@@ -1,0 +1,104 @@
+name: iOS build & test
+
+# このリポジトリは public なので、macOS ランナーは無料で使える。
+# Mac を持っていなくても「コンパイルが通るか」「単体テストが通るか」はここで確認できる。
+# 実機でしか測れないもの（NFR-01 の 16ms、Apple Pencil、フットペダル、暗所）は対象外。
+
+on:
+  push:
+    paths:
+      - 'ios/**'
+      - '.github/workflows/ios.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 40
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 環境を表示
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+
+      - name: XcodeGen を入れる
+        run: brew install xcodegen
+
+      - name: Xcode プロジェクトを生成
+        working-directory: ios
+        run: |
+          xcodegen generate
+          xcodebuild -list -project ScoreStand.xcodeproj
+
+      # ランナーによって用意されているシミュレータが違う。
+      # 名前を決め打ちすると壊れるので、利用可能な iPad を実行時に選ぶ。
+      - name: シミュレータを選ぶ
+        id: sim
+        run: |
+          xcrun simctl list devices available
+          UDID=$(xcrun simctl list devices available --json \
+            | python3 -c "
+import json,sys
+data = json.load(sys.stdin)['devices']
+for runtime, devices in data.items():
+    if 'iOS' not in runtime:
+        continue
+    for d in devices:
+        if d.get('isAvailable') and 'iPad' in d['name']:
+            print(d['udid']); sys.exit(0)
+# iPad が無ければ iPhone でも構わない（コンパイル検証が目的）
+for runtime, devices in data.items():
+    if 'iOS' not in runtime:
+        continue
+    for d in devices:
+        if d.get('isAvailable'):
+            print(d['udid']); sys.exit(0)
+sys.exit(1)
+")
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          xcrun simctl list devices | grep "$UDID" || true
+
+      - name: ビルド
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project ScoreStand.xcodeproj \
+            -scheme ScoreStand \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            CODE_SIGNING_ALLOWED=NO \
+            | tee build.log
+
+      - name: テスト
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project ScoreStand.xcodeproj \
+            -scheme ScoreStand \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            CODE_SIGNING_ALLOWED=NO \
+            | tee test.log
+
+      - name: 警告を集計
+        if: always()
+        working-directory: ios
+        run: |
+          echo "### 警告" >> "$GITHUB_STEP_SUMMARY"
+          grep -h "warning:" build.log 2>/dev/null | sed 's|.*/||' | sort | uniq -c | sort -rn | head -40 >> "$GITHUB_STEP_SUMMARY" || echo "なし" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: ログを保存
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs
+          path: ios/*.log
+          if-no-files-found: ignore

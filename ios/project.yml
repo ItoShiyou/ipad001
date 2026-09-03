@@ -35,3 +35,16 @@ targets:
       - path: ScoreStandTests
     dependencies:
       - target: ScoreStand
+
+schemes:
+  ScoreStand:
+    build:
+      targets:
+        ScoreStand: all
+        ScoreStandTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - ScoreStandTests
