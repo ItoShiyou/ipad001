@@ -1,5 +1,7 @@
 # ipad001 — 買い切りネイティブアプリ 事業化リサーチ
 
+[![iOS build & test](https://github.com/ItoShiyou/ipad001/actions/workflows/ios.yml/badge.svg)](https://github.com/ItoShiyou/ipad001/actions/workflows/ios.yml)
+
 「既に買い切りアプリとして存在するが、問題を抱えて評価3.5前後に留まっているアプリ」を特定し、
 **完全ネイティブ / ローカル完結 / サーバーレス** で作り直す、という前提の調査リポジトリ。
 
@@ -22,6 +24,7 @@
 - [`docs/monetization.md`](docs/monetization.md) — 収益化概算（**単位経済のみ有効**）
 - [`docs/requirements.md`](docs/requirements.md) — 要件定義（レビュー用ドラフト）
 - [`docs/implementation-status.md`](docs/implementation-status.md) — **実装状況とM要件の対応表**
+- [`docs/next-actions.md`](docs/next-actions.md) — **★ あなたにしかできないこと（優先順）**
 - [`docs/archive-format.md`](docs/archive-format.md) — 書き出しフォーマット仕様（公開）
 - [`docs/page-turn-input.md`](docs/page-turn-input.md) — 譜めくり入力の設計空間（**v1では保留**）
 - [`docs/proposal-iphone-remote.md`](docs/proposal-iphone-remote.md) — 企画提案: iPhoneを譜めくりリモコンにする
