@@ -11,41 +11,48 @@
 それが実機で成立しなければ**製品の前提そのものが崩れる**。他の作業はすべてこの後でよい。
 逆にここが通れば、残りは順当に積み上げるだけになる。
 
-### 必要なもの
+### 環境
 
-| もの | 備考 |
-|---|---|
-| **Mac** | MacBook でなくてよい。**Mac mini が最安**（画面・キーボードは手持ちを流用）。中古の M1/M2 で十分 |
-| **iPad 実機** | お持ちのもの。シミュレータの数値は Mac の性能なので**意味がない** |
-| Lightning / USB-C ケーブル | |
-| Apple ID | **無料で可**。証明書が7日で切れるが検証には足りる |
+**MacBook Air M2 / 16GB** — Xcode の開発機として十分。
+実機の iPad と USB-C ケーブルを用意する。**シミュレータの数値は Mac の性能なので意味がない。**
+Apple ID は**無料のもので足りる**（証明書が7日で切れるが、検証用途なら問題ない）。
 
 ### 手順
 
 ```bash
+# 1. 準備（初回のみ）
 brew install xcodegen
 git clone https://github.com/ItoShiyou/ipad001.git
 cd ipad001/ios
+
+# 2. Xcode プロジェクトを生成して開く
 xcodegen generate
 open ScoreStand.xcodeproj
 ```
 
-1. Xcode で `project.yml` の `PRODUCT_BUNDLE_IDENTIFIER` を自分のものに変える
-   （`com.example.ScoreStand` のままでは実機に入らない）
-2. Signing & Capabilities で自分の Apple ID を選ぶ
-3. iPad を繋いで Run
-4. **100ページ以上ある大判の楽譜PDF**を取り込む（薄い楽譜では意味のある計測にならない）
-5. Xcode の Instruments → **os_signpost** 計器で `pageTurn` の区間を見る
+3. `ios/project.yml` の `PRODUCT_BUNDLE_IDENTIFIER` を自分のものに変える
+   （`com.example.ScoreStand` のままでは実機に入らない）。変更後は `xcodegen generate` をやり直す
+4. Signing & Capabilities で自分の Apple ID を選ぶ
+5. iPad を繋いで Run
+6. **100ページ以上ある大判の楽譜PDF**を取り込む（薄い楽譜では先読みの検証にならない）
+7. Product → Profile で Instruments を起動し、**os_signpost** 計器を選ぶ
 
 ### 見るべき数値
 
-| 指標 | 目標 | 判定 |
+| signpost | 目標 | 意味 |
 |---|---|---|
-| `pageTurn` 区間 | **16ms 以内** | 超えるなら設計の見直しが要る。私に数値を渡してほしい |
-| `coldStartToScore` | 2.0秒以内 | |
-| ピークメモリ | 大判PDFでも一定 | 増え続けるならキャッシュの取りこぼし |
+| `pageTurn` | **16ms 以内**（NFR-01） | 超えるなら先読みが間に合っていない。設計の見直しが要る |
+| `coldStartToScore` | 2.0秒以内（NFR-02） | 起動から譜面が出るまで |
+| ピークメモリ | 大判PDFでも一定（NFR-03） | 増え続けるならキャッシュの取りこぼし |
 
-**結果を貼ってもらえれば、そこから先は私が対応する。**
+**数値を貼ってもらえれば、そこから先の改善は私がやる。**
+
+### ついでに確認してほしいこと（実機でしか分からない）
+
+- [ ] Apple Pencil の書き味、パームリジェクション（手をついて書けるか）
+- [ ] 譜めくりのタップ領域（画面幅の左右1/3）が、演奏姿勢で押しやすいか
+- [ ] 反転表示が暗所で実用になるか
+- [ ] Split View で楽譜と他アプリを並べたときに破綻しないか
 
 ---
 
@@ -103,5 +110,8 @@ python3 tools/appstore_probe.py discover --country jp
 ## 現在の状態
 
 - **コード**: M（必須）要件は一通り実装済み。[`implementation-status.md`](implementation-status.md) に対応表
-- **CI**: `.github/workflows/ios.yml` が push ごとにビルドと単体テストを回す（public リポジトリなので無料）
+- **ビルド**: ✅ **macOS ランナーで通ることを確認済み**（Xcode 26.6 / iOS 26.5 SDK / iPad Pro 13-inch シミュレータ）
+- **CI**: `.github/workflows/ios.yml` が `ios/` への push ごとにビルドと単体テストを回す。
+  public リポジトリなので macOS ランナーは無料。**失敗すればエラー行だけが要約されて出る**ので、
+  私がそのまま読んで直せる
 - **未検証**: 実機での性能、Apple Pencil、フットスイッチ、暗所、電池 —— いずれも **1** が前提
