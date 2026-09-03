@@ -33,6 +33,15 @@ struct ScoreDetailView: View {
                     }
             }
 
+            Section("表示") {
+                NavigationLink {
+                    ScoreCropListView(score: score)
+                } label: {
+                    Label("余白の調整", systemImage: "crop")
+                }
+                .disabled(score.pageCount == 0)
+            }
+
             Section("情報") {
                 LabeledContent("ページ数", value: "\(score.pageCount)")
                 ForEach(score.sources.sorted(by: { $0.order < $1.order }), id: \.id) { source in

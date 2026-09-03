@@ -7,6 +7,9 @@ import SwiftUI
 struct PerformanceView: View {
     @State private var model: PerformanceViewModel
     @State private var showsControls = false
+    /// 注釈の編集中。編集中はタップが注釈に取られるため、
+    /// 譜めくりはペダルとキーボードだけになる。演奏中に入る想定ではない。
+    @State private var isAnnotating = false
     @Environment(PerformanceSession.self) private var session
     @Environment(\.dismiss) private var dismiss
 
@@ -35,6 +38,16 @@ struct PerformanceView: View {
                         tapSource.handleTap(at: location.x, width: proxy.size.width)
                     }
                     .gesture(swipeGesture)
+
+                // 注釈は譜面の上に重ねるだけで、譜面自体には触れない（FR-41）。
+                if let score = model.score {
+                    AnnotationOverlay(
+                        score: score,
+                        pageIndex: model.currentPageIndex,
+                        isEditing: isAnnotating,
+                        isVisible: model.showsAnnotations
+                    )
+                }
 
                 if showsControls {
                     controlBar
@@ -121,6 +134,24 @@ struct PerformanceView: View {
             }
             .labelsHidden()
             .toggleStyle(.button)
+
+            // FR-42: 注釈の表示・非表示。書き込みを消さずに譜面だけを見たい場面がある。
+            Toggle(isOn: $model.showsAnnotations) {
+                Label("注釈", systemImage: model.showsAnnotations ? "pencil.circle.fill" : "pencil.slash")
+            }
+            .labelsHidden()
+            .toggleStyle(.button)
+
+            // FR-40 / FR-45: 注釈の書き込み。
+            Button {
+                isAnnotating.toggle()
+                if isAnnotating { model.showsAnnotations = true }
+            } label: {
+                Label(
+                    isAnnotating ? "書き込み中" : "書き込む",
+                    systemImage: isAnnotating ? "pencil.tip.crop.circle.fill" : "pencil.tip.crop.circle"
+                )
+            }
 
             // FR-25: 誤操作防止ロック。譜めくり以外を止める。
             Button {

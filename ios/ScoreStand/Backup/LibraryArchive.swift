@@ -25,12 +25,16 @@ final class LibraryArchive {
     /// `url` はユーザーが Files / iCloud Drive で選んだ書き出し先（`.scorestand`）。
     /// ドキュメントピッカー経由の URL はセキュリティスコープ付きのことがあるため、
     /// アクセス開始・終了を必ず対にする。
+    ///
+    /// `async` なのは、書き出しの実体がファイル I/O だからである。数GBのPDFを
+    /// メインアクタで書くと画面が固まり、ウォッチドッグに落とされる。
+    /// モデルから値型へ写し終えた時点で、以降はメインスレッドの外へ出す。
     func export(
         scores: [Score],
         setlists: [Setlist],
         to url: URL,
-        progress: ((Double) -> Void)? = nil
-    ) throws {
+        progress: (@MainActor (Double) -> Void)? = nil
+    ) async throws {
         let needsScope = url.startAccessingSecurityScopedResource()
         defer { if needsScope { url.stopAccessingSecurityScopedResource() } }
 
@@ -42,12 +46,6 @@ final class LibraryArchive {
         // 1. 書庫に埋め込むファイル実体を PageSource から集める。
         //    ArchiveFile.id には PageSource.id をそのまま使う。書き出し・読み込みの
         //    両方でこの id を使い回すだけで済み、別途対応表を持たずに済むため。
-        struct PendingFile {
-            let id: UUID
-            let originalName: String
-            let sourceURL: URL
-            let size: UInt64
-        }
         var pendingFiles: [PendingFile] = []
         var seenIDs = Set<UUID>()
 
@@ -147,17 +145,26 @@ final class LibraryArchive {
         // 3. ヘッダ + マニフェストを書き、続けてファイル実体を offset の順に追記する。
         //    `ArchiveWriter` はどちらもチャンク単位の `FileHandle` I/O なので、
         //    数GBのPDFを積んでもピークメモリは一定に保たれる。
-        let handle = try ArchiveWriter.createHeader(manifest: manifest, at: url)
-        defer { try? handle.close() }
+        //    ここから先はモデルに一切触れないため、まるごとメインスレッドの外へ出せる。
+        let sourceURLs = pendingFiles.map(\.sourceURL)
+        let finalManifest = manifest
+        let destination = url
 
-        let total = max(pendingFiles.count, 1)
-        for (index, pending) in pendingFiles.enumerated() {
-            _ = try ArchiveWriter.appendFile(at: pending.sourceURL, to: handle)
-            progress?(Double(index + 1) / Double(total))
-        }
-        if pendingFiles.isEmpty {
-            progress?(1.0)
-        }
+        try await Task.detached(priority: .userInitiated) {
+            let handle = try ArchiveWriter.createHeader(manifest: finalManifest, at: destination)
+            defer { try? handle.close() }
+
+            let total = max(sourceURLs.count, 1)
+            for (index, sourceURL) in sourceURLs.enumerated() {
+                _ = try ArchiveWriter.appendFile(at: sourceURL, to: handle)
+                if let progress {
+                    await progress(Double(index + 1) / Double(total))
+                }
+            }
+            if sourceURLs.isEmpty, let progress {
+                await progress(1.0)
+            }
+        }.value
     }
 
     // MARK: - 読み込み
@@ -168,10 +175,12 @@ final class LibraryArchive {
     /// 楽譜が消えるのは取り返しがつかない事故になるため（設計原則 P3）、
     /// 「置き換え」ではなく常に「追加」として実装している。重複が気になる場合は
     /// ユーザー自身が読み込み後に手動で整理する前提。
+    ///
+    /// `async` なのは export と同じ理由で、書庫の展開がファイル I/O だからである。
     func importArchive(
         from url: URL,
-        progress: ((Double) -> Void)? = nil
-    ) throws -> (scoreCount: Int, setlistCount: Int) {
+        progress: (@MainActor (Double) -> Void)? = nil
+    ) async throws -> (scoreCount: Int, setlistCount: Int) {
         let needsScope = url.startAccessingSecurityScopedResource()
         defer { if needsScope { url.stopAccessingSecurityScopedResource() } }
 
@@ -180,21 +189,31 @@ final class LibraryArchive {
         // 1. ファイル実体を ScoreStore の管理下に展開する。
         //    `ArchiveReader.extractFile` は書庫から読んだそばから書き出し先へ流すだけで、
         //    ファイル全体を一度に Data として抱えない（数GB級のPDFがあり得るため）。
-        var relativePathByFileID: [UUID: String] = [:]
         let totalSteps = max(manifest.files.count + manifest.scores.count, 1)
-        var completedSteps = 0
+        let entries = manifest.files
+        let store = self.store
+        let archiveURL = url
 
-        for file in manifest.files {
-            let ext = URL(fileURLWithPath: file.originalName).pathExtension
-            let relativePath = "\(UUID().uuidString).\(ext.isEmpty ? "dat" : ext.lowercased())"
-            let destinationURL = store.fileURL(for: relativePath)
-            try ArchiveReader.extractFile(file, from: url, to: destinationURL)
-            try excludeFromBackup(destinationURL)
-            relativePathByFileID[file.id] = relativePath
+        let relativePathByFileID: [UUID: String] = try await Task.detached(priority: .userInitiated) {
+            var mapping: [UUID: String] = [:]
+            var completed = 0
+            for file in entries {
+                let ext = URL(fileURLWithPath: file.originalName).pathExtension
+                let relativePath = "\(UUID().uuidString).\(ext.isEmpty ? "dat" : ext.lowercased())"
+                let destinationURL = store.fileURL(for: relativePath)
+                try ArchiveReader.extractFile(file, from: archiveURL, to: destinationURL)
+                try Self.excludeFromBackup(destinationURL)
+                mapping[file.id] = relativePath
 
-            completedSteps += 1
-            progress?(Double(completedSteps) / Double(totalSteps))
-        }
+                completed += 1
+                if let progress {
+                    await progress(Double(completed) / Double(totalSteps))
+                }
+            }
+            return mapping
+        }.value
+
+        var completedSteps = entries.count
 
         // 2. Score / PageSource / PageSetting / AnnotationLayer を作り直す。
         var importedScores: [Score] = []
@@ -288,10 +307,20 @@ final class LibraryArchive {
     /// iCloud バックアップから除外する。楽譜PDFは容量が大きく、原本はユーザー自身が
     /// 持っている（書き出しファイル自体が正規の退避手段）ため、`ScoreStore.importFile` と
     /// 同じ方針をここでも踏襲する。
-    private func excludeFromBackup(_ url: URL) throws {
+    nonisolated static func excludeFromBackup(_ url: URL) throws {
         var url = url
         var values = URLResourceValues()
         values.isExcludedFromBackup = true
         try url.setResourceValues(values)
     }
+}
+
+/// 書庫に埋め込む予定のファイル1件。
+///
+/// モデルから写し取った値型なので、メインアクタの外へそのまま渡せる。
+private struct PendingFile: Sendable {
+    let id: UUID
+    let originalName: String
+    let sourceURL: URL
+    let size: UInt64
 }

@@ -21,6 +21,8 @@
 - [`docs/research.md`](docs/research.md) — 初回の競合調査（**一部否定済み**）
 - [`docs/monetization.md`](docs/monetization.md) — 収益化概算（**単位経済のみ有効**）
 - [`docs/requirements.md`](docs/requirements.md) — 要件定義（レビュー用ドラフト）
+- [`docs/implementation-status.md`](docs/implementation-status.md) — **実装状況とM要件の対応表**
+- [`docs/archive-format.md`](docs/archive-format.md) — 書き出しフォーマット仕様（公開）
 - [`docs/page-turn-input.md`](docs/page-turn-input.md) — 譜めくり入力の設計空間（**v1では保留**）
 - [`docs/proposal-iphone-remote.md`](docs/proposal-iphone-remote.md) — 企画提案: iPhoneを譜めくりリモコンにする
 - [`docs/tech-plan.md`](docs/tech-plan.md) — 技術方針（電子楽譜リーダー）
