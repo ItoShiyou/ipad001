@@ -50,24 +50,41 @@ jobs:
       - name: ビルド
         working-directory: ios
         run: |
-          set -o pipefail
+          set +e
           xcodebuild build \
             -project ScoreStand.xcodeproj \
             -scheme ScoreStand \
             -destination "id=${{ steps.sim.outputs.udid }}" \
             CODE_SIGNING_ALLOWED=NO \
-            | tee build.log
+            > build.log 2>&1
+          status=$?
+          # 失敗時はログ全文ではなくエラー行だけを出す。
+          # 全文はランナーのログ末尾に埋もれて読めないため。
+          if [ $status -ne 0 ]; then
+            echo "================ COMPILE ERRORS ================"
+            grep -E "error:" build.log \
+              | sed -E 's|/Users/runner/work/ipad001/ipad001/ios/||' \
+              | sort -u | head -120
+            echo "================ END ERRORS ===================="
+          fi
+          exit $status
 
       - name: テスト
         working-directory: ios
         run: |
-          set -o pipefail
+          set +e
           xcodebuild test \
             -project ScoreStand.xcodeproj \
             -scheme ScoreStand \
             -destination "id=${{ steps.sim.outputs.udid }}" \
             CODE_SIGNING_ALLOWED=NO \
-            | tee test.log
+            > test.log 2>&1
+          status=$?
+          echo "================ TEST RESULTS =================="
+          grep -E "Test Case .* (passed|failed)|error:|Executed [0-9]+ test" test.log \
+            | sed -E 's|/Users/runner/work/ipad001/ipad001/ios/||' | tail -60
+          echo "================ END TESTS ====================="
+          exit $status
 
       - name: 警告を集計
         if: always()

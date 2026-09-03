@@ -7,8 +7,9 @@ import SwiftData
 /// ここにぶら下がる別レコードとして保存する。
 @Model
 final class Score {
-    #Index<Score>([\.title], [\.createdAt])
-
+    // `#Index` は iOS 18 以降でしか使えない。デプロイターゲットが 17 である以上、
+    // ここでは張らない。曲数は個人の楽譜ライブラリの規模なので、
+    // 索引なしでも一覧の絞り込みは十分に速い。
     var id: UUID = UUID()
     var title: String = ""
     var composer: String = ""
