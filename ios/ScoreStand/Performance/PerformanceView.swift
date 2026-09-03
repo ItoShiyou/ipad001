@@ -13,6 +13,13 @@ struct PerformanceView: View {
     @Environment(PerformanceSession.self) private var session
     @Environment(\.dismiss) private var dismiss
 
+    /// FR-14（ベータ）: 暗転中の客席への配慮で画面の明るさを下げる。
+    /// 演奏を終えたら必ず元に戻す（`onDisappear`）。スライダーではなく数段階の
+    /// 循環ボタンにしているのは、暗所で細かい操作をさせないため（P5）。
+    @State private var brightnessLevelIndex = 0
+    private static let brightnessLevels: [CGFloat] = [1.0, 0.6, 0.3, 0.12]
+    @State private var originalBrightness: CGFloat = UIScreen.main.brightness
+
     private let hub: PageTurnInputHub
     private let tapSource: TapInputSource
     private let keyboardSource: KeyboardInputSource
@@ -80,6 +87,7 @@ struct PerformanceView: View {
                 }
             }
             .onAppear {
+                originalBrightness = UIScreen.main.brightness
                 model.updateLayout(size: proxy.size, scale: displayScale)
                 // 配線を先に済ませてから活性化する。逆順だと、
                 // 開いた直後に踏まれたペダルの1回目を取りこぼす。
@@ -103,12 +111,20 @@ struct PerformanceView: View {
         .onDisappear {
             hub.deactivateAll()
             model.onDisappear()
+            // 演奏ビューを閉じたら明るさは必ず元に戻す。落とした状態が
+            // 他の画面まで持ち越されると、無関係な操作に気づけなくなる。
+            UIScreen.main.brightness = originalBrightness
         }
         // フットスイッチ・Bluetoothリモコンはキーボードとして届く（FR-21 / FR-28）。
         .background(KeyCommandCatcher(source: keyboardSource))
     }
 
     @Environment(\.displayScale) private var displayScale
+
+    private func cycleBrightness() {
+        brightnessLevelIndex = (brightnessLevelIndex + 1) % Self.brightnessLevels.count
+        UIScreen.main.brightness = Self.brightnessLevels[brightnessLevelIndex]
+    }
 
     private var swipeGesture: some Gesture {
         DragGesture(minimumDistance: 40)
@@ -149,6 +165,12 @@ struct PerformanceView: View {
             }
             .labelsHidden()
             .toggleStyle(.button)
+
+            Button {
+                cycleBrightness()
+            } label: {
+                Label("明るさ", systemImage: "sun.max")
+            }
 
             Toggle(isOn: $model.isTwoPageSpread) {
                 Label("見開き", systemImage: "book")

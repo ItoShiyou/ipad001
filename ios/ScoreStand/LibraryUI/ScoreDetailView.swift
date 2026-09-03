@@ -6,9 +6,13 @@ struct ScoreDetailView: View {
     @Bindable var score: Score
 
     @Environment(\.modelContext) private var modelContext
+    @Environment(AppEnvironment.self) private var environment
     @State private var tagsText: String = ""
     @State private var isPerformancePresented = false
     @State private var isPracticeToolsPresented = false
+    @State private var isAppendImporterPresented = false
+    @State private var errorMessage: String?
+    @State private var isErrorPresented = false
 
     var body: some View {
         Form {
@@ -51,11 +55,21 @@ struct ScoreDetailView: View {
 
             jumpPointsSection
 
-            Section("情報") {
+            Section {
                 LabeledContent("ページ数", value: "\(score.pageCount)")
                 ForEach(score.sources.sorted(by: { $0.order < $1.order }), id: \.id) { source in
                     LabeledContent(source.originalName, value: "\(source.pageCount)ページ")
                 }
+                Button {
+                    isAppendImporterPresented = true
+                } label: {
+                    Label("PDF / 画像を追記", systemImage: "doc.badge.plus")
+                }
+            } header: {
+                Text("情報")
+            } footer: {
+                // FR-06: 複数PDFを1曲として連結する（の「後から追記する」側）。
+                Text("追記したファイルは既存ページの後ろに追加されます。")
             }
         }
         .navigationTitle(score.title.isEmpty ? "無題の楽譜" : score.title)
@@ -74,6 +88,34 @@ struct ScoreDetailView: View {
         }
         .sheet(isPresented: $isPracticeToolsPresented) {
             PracticeToolsView(score: score)
+        }
+        .fileImporter(
+            isPresented: $isAppendImporterPresented,
+            allowedContentTypes: DocumentImporter.supportedTypes,
+            allowsMultipleSelection: true
+        ) { result in
+            handleAppendResult(result)
+        }
+        .alert("エラー", isPresented: $isErrorPresented, presenting: errorMessage) { _ in
+            Button("OK") {}
+        } message: { message in
+            Text(message)
+        }
+    }
+
+    private func handleAppendResult(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            guard !urls.isEmpty else { return }
+            do {
+                try environment.makeImporter().appendSources(to: score, from: urls)
+            } catch {
+                errorMessage = error.localizedDescription
+                isErrorPresented = true
+            }
+        case .failure(let error):
+            errorMessage = error.localizedDescription
+            isErrorPresented = true
         }
     }
 
