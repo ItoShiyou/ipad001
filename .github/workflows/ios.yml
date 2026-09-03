@@ -44,27 +44,8 @@ jobs:
         id: sim
         run: |
           xcrun simctl list devices available
-          UDID=$(xcrun simctl list devices available --json \
-            | python3 -c "
-import json,sys
-data = json.load(sys.stdin)['devices']
-for runtime, devices in data.items():
-    if 'iOS' not in runtime:
-        continue
-    for d in devices:
-        if d.get('isAvailable') and 'iPad' in d['name']:
-            print(d['udid']); sys.exit(0)
-# iPad が無ければ iPhone でも構わない（コンパイル検証が目的）
-for runtime, devices in data.items():
-    if 'iOS' not in runtime:
-        continue
-    for d in devices:
-        if d.get('isAvailable'):
-            print(d['udid']); sys.exit(0)
-sys.exit(1)
-")
+          UDID=$(python3 ios/Scripts/pick_simulator.py)
           echo "udid=$UDID" >> "$GITHUB_OUTPUT"
-          xcrun simctl list devices | grep "$UDID" || true
 
       - name: ビルド
         working-directory: ios
