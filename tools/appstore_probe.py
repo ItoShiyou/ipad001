@@ -11,6 +11,8 @@
     python3 tools/appstore_probe.py 308998718       # ID指定
     python3 tools/appstore_probe.py --country jp 308998718
     python3 tools/appstore_probe.py --reviews 50 308998718
+    python3 tools/appstore_probe.py --search           # ID不明のアプリを名前で解決
+    python3 tools/appstore_probe.py --search --country jp
 
 標準ライブラリのみ。依存パッケージなし。
 """
@@ -25,20 +27,47 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-# docs/research.md で言及した調査対象。
+# 検証対象。ID が分かっているものは TARGETS、分からないものは SEARCH_NAMES に置く。
 TARGETS: dict[str, str] = {
+    # 音楽練習系
     "308998718": "Amazing Slow Downer",
     "310204778": "Amazing Slow Downer Lite",
-    "722444976": "Anytune: Practice Perfected",
+    "415365180": "Anytune",
     "887497388": "Capo - Learn Music by Ear",
+    # テレプロンプター系
     "941070561": "Teleprompter Pro",
     "894811756": "PromptSmart Pro",
     "1010384663": "Parrot Teleprompter",
-    "470428362": "Technique by OnForm",
+    # スポーツ動画分析系
+    "470428362": "Technique by OnForm (2021年で更新停止の疑い)",
     "1490334045": "OnForm: Video Analysis",
     "1040982427": "myDartfish Express",
+    # PDF / 書類系
     "777310222": "GoodReader PDF Editor & Viewer",
 }
+
+# ID が不確かなものは名前で検索して解決する（--search で実行）。
+SEARCH_NAMES: list[str] = [
+    # 買い切り→サブスク移行の反発が観測された群
+    "Notability",
+    "GoodNotes",
+    "Noteshelf",
+    "PDF Expert",
+    "Scanner Pro",
+    # オフライン地図 / GPS
+    "Gaia GPS",
+    "Topo Maps+",
+    "Guru Maps",
+    "YAMAP",
+    "ヤマレコ",
+    # 暗記 / 学習
+    "AnkiMobile Flashcards",
+    # ローカル完結の家計簿
+    "Money Pro",
+    "MoneyWiz",
+    # 天体
+    "SkySafari",
+]
 
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15"
 
@@ -94,6 +123,39 @@ def reviews(app_id: str, country: str, limit: int) -> list[dict]:
     return out[:limit]
 
 
+def search(term: str, country: str, limit: int = 5) -> list[dict]:
+    """iTunes Search API で名前からアプリを解決する。"""
+    qs = urllib.parse.urlencode(
+        {"term": term, "country": country, "entity": "software", "limit": limit}
+    )
+    data = _get_json(f"https://itunes.apple.com/search?{qs}")
+    return data.get("results") or []
+
+
+def search_report(term: str, country: str) -> None:
+    """名前で引いた候補を一覧表示する。ID の特定と星評価の粗い把握が目的。"""
+    try:
+        hits = search(term, country)
+    except Exception as exc:
+        print(f"[{term}] search 失敗: {exc}", file=sys.stderr)
+        return
+    if not hits:
+        print(f"[{term}] country={country} でヒットなし", file=sys.stderr)
+        return
+    print("=" * 72)
+    print(f"検索語: {term}  (country={country})")
+    for hit in hits:
+        print(
+            f"  id={hit.get('trackId')}  {hit.get('trackName')}"
+            f"  [{hit.get('sellerName')}]"
+        )
+        print(
+            f"      {hit.get('formattedPrice')}   "
+            f"評価 {hit.get('averageUserRating')} ({hit.get('userRatingCount')} 件)   "
+            f"更新 {str(hit.get('currentVersionReleaseDate'))[:10]}"
+        )
+
+
 def report(app_id: str, country: str, review_limit: int) -> None:
     label = TARGETS.get(app_id, app_id)
     try:
@@ -144,7 +206,18 @@ def main() -> int:
     parser.add_argument("app_ids", nargs="*", help="App Store の track ID（省略時は既定の調査対象すべて）")
     parser.add_argument("--country", default="us", help="ストアの国コード（既定: us。日本は jp）")
     parser.add_argument("--reviews", type=int, default=20, help="取得するレビュー件数（0で取得しない）")
+    parser.add_argument(
+        "--search",
+        action="store_true",
+        help="SEARCH_NAMES の各アプリを名前で検索し、ID と星評価を一覧する",
+    )
     args = parser.parse_args()
+
+    if args.search:
+        for term in SEARCH_NAMES:
+            search_report(term, args.country)
+            print()
+        return 0
 
     app_ids = args.app_ids or list(TARGETS)
     for app_id in app_ids:
