@@ -1,79 +1,73 @@
-# 技術的実現可能性とアーキテクチャ方針
+# 技術方針 — 電子楽譜リーダー
 
-対象: 候補① 音楽練習用オーディオプレイヤー（第1弾）
+対象: [`decision.md`](decision.md) で確定した「本番で絶対に落ちない譜面台」
 
 ---
 
-## 1. 方針
+## 1. 基本方針
 
 | 項目 | 決定 |
 |---|---|
-| iOS/iPadOS | **Swift + SwiftUI**（ネイティブ）。音声処理は AVFoundation / AVAudioEngine |
-| Android | **Kotlin + Jetpack Compose**（ネイティブ）。音声は Oboe (AAudio) |
-| 共通化 | UIは共通化しない。**DSPコアのみ C++ で共有**する余地を残す |
-| 通信 | **なし**。ネットワーク権限そのものを Info.plist / manifest から落とす |
-| 永続化 | iOS: SwiftData（または Core Data）／ Android: Room。いずれも端末内 |
-| 同期 | 任意で iCloud Drive / CloudKit private DB。**ユーザー自身のストレージであり自前サーバーではない** |
-| 分析基盤 | **入れない**。クラッシュ情報は Apple/Google 標準のものだけを使う |
+| iOS / iPadOS | **Swift + SwiftUI**。描画は PDFKit、注釈は PencilKit、音は AVAudioEngine |
+| Android | **Kotlin + Jetpack Compose**（P4）。PDF は PdfRenderer |
+| 共通化 | UIは共通化しない。**データモデルとファイル形式のみ仕様として共有** |
+| 通信 | **なし。** Info.plist / manifest からネットワーク権限そのものを落とす |
+| 永続化 | SwiftData（端末内）。PDF実体はアプリコンテナに保管 |
+| バックアップ | ユーザー自身の iCloud Drive / Files へ書き出すのみ。**自前サーバーなし** |
+| 解析基盤 | **入れない。** クラッシュ情報は Apple / Google 標準のみ |
 
-> 「ネットワーク権限を持たない」ことは App Store のプライバシーラベル上
-> "Data Not Collected" と表示でき、**それ自体がストアページ上のセールスポイントになる。**
+> ネットワーク権限を持たないため、App Store のプライバシーラベルが
+> **"Data Not Collected"** になる。演奏者・音楽教室・学校に売るうえで、
+> これ自体がストアページ上の説得材料になる。
 
 ---
 
-## 2. 中核の技術要素と難易度
+## 2. 中核の技術要素
 
-| 機能 | iOS 実装 | Android 実装 | 難度 |
+| 機能 | iOS 実装 | 難度 | 備考 |
 |---|---|---|---|
-| 速度変更（ピッチ維持） | `AVAudioUnitTimePitch` (rate) | Oboe + Sonic / SoundTouch | 低 |
-| ピッチ変更（速度維持） | `AVAudioUnitTimePitch` (pitch) | 同上 | 低 |
-| サンプル精度ABループ | `AVAudioPlayerNode.scheduleSegment` を連結 | 自前リングバッファ | **中** |
-| 波形描画 | `AVAssetReader` でPCM取得 → ダウンサンプル → Canvas/Metal | MediaCodec で PCM 取得 → Canvas | 中 |
-| スペクトログラム | `vDSP` FFT | KissFFT / 自前 | 中 |
-| EQ | `AVAudioUnitEQ` | 自前 biquad | 低 |
-| センター音源除去 | L−R 減算 + 帯域制限（自前DSP） | 同上 | 中 |
-| メトロノーム重畳 | 別 `AVAudioPlayerNode` をミックス | 同上 | 低 |
-| バックグラウンド再生 | `AVAudioSession` + Now Playing | MediaSession + Foreground Service | 低 |
-| Split View / Stage Manager | SwiftUI で標準対応 | — | 低 |
-| ファイル取り込み | `UIDocumentPicker` / Files / `MPMediaPickerController` | SAF | 低 |
+| PDF描画 | `PDFKit` / `CGPDFDocument` | 低 | |
+| **ページ先読み** | 前後ページを別スレッドで事前ラスタライズしキャッシュ | **中** | **製品の中核。ここだけは妥協しない** |
+| 譜めくり（タップ/スワイプ） | SwiftUI ジェスチャ | 低 | |
+| **BLEフットペダル** | AirTurn / PageFlip は **HIDキーボードとして接続**される。`UIKeyCommand` で拾うだけ | **低** | BLE を自前実装する必要がない |
+| セットリスト | SwiftData のモデル | 低 | |
+| 見開き / 半ページめくり / 余白トリミング | `PDFPage` の cropBox 操作 | 中 | |
+| 注釈 | `PencilKit` の `PKCanvasView` をページに重畳。**元PDFは非破壊** | 中 | 描画データは別レイヤで保持 |
+| 暗所用の反転表示 | CoreImage フィルタ、またはレンダリング時に反転 | 低 | |
+| メトロノーム | `AVAudioPlayerNode` を専用ノードで常駐 | 低 | |
+| チューナー | `AVAudioEngine` の入力タップ + `vDSP` FFT + 自己相関 | 中 | |
+| **メトロノームとチューナーの同時使用** | 単一の `AVAudioEngine` に入力タップと出力ノードを共存させる | **中** | **Piascore の明確な不満点。ここは必ず通す** |
+| 取り込み | `UIDocumentPicker` / Drag & Drop / AirDrop | 低 | |
 
-**総評: 個人開発の射程内。** 最も工数がかかるのは DSP ではなく
-「波形UIの操作感」と「iPadの各種マルチタスク・外部入力への対応」。
-そしてそここそが既存競合（Amazing Slow Downer の旧世代UI、Anytune の Split View 非対応）
-が落としているポイントであり、**投資先として正しい**。
-
-### 注意すべき制約
-- **DRM保護された Apple Music / Spotify の楽曲は加工できない。** これは技術的制約ではなく
-  ライセンス上の制約であり、回避不能。ストアページとオンボーディングで**最初に明示する**こと。
-  Amazing Slow Downer はここで期待値の裏切りを起こしレビューを落としている。
-- Android の低遅延音声はデバイス差が大きい。**Android版はiOS版の完全移植ではなく、
-  機能を絞った版として後追いで出す**のが安全。
+**総評: 実装は個人開発の射程内。** ML も動画パイプラインもサーバーも要らない。
+工数が集中するのは機能追加ではなく、**先読みの安定性と、演奏中に一切詰まらせないこと**。
 
 ---
 
-## 3. iPad ファーストの具体的な意味
+## 3. 「落ちない」を設計に落とす
 
-単に「大画面に対応する」ではなく、以下を初期リリースの必須要件とする。
+宣伝文句が「本番で落ちない」である以上、これは機能ではなく**設計制約**として扱う。
 
-- [ ] Split View / Slide Over / Stage Manager（楽譜PDFやブラウザと並べて使うのが実使用）
-- [ ] 外部ディスプレイ（Stage Manager 経由の独立表示）
-- [ ] ハードウェアキーボードショートカット（再生/停止、ループ点設定、速度±）
-- [ ] トラックパッド / マウスのポインタ対応、波形上でのスクラブ
-- [ ] Apple Pencil でのループ範囲・マーカー指定
-- [ ] ダーク/ライト、Dynamic Type、VoiceOver（AppleVis 系コミュニティでの評価が獲得できる）
-- [ ] 縦横両対応、Slide Over 幅でも破綻しないレイアウト
+- **演奏モード中はバックグラウンド処理を全面停止。** サムネイル生成・インデックス作成・
+  ファイル走査は演奏モード外でのみ実行する
+- **メモリ上限を先に決める。** 保持するのは「現在・前・次」の3ページのみ。
+  大判PDFはタイル分割して部分ラスタライズ
+- **自動スリープ抑止**（`isIdleTimerDisabled`）と、電池低下時の挙動を明示
+- **計測して回帰させない**: 起動→譜面表示までの時間、譜めくりのフレーム落ち、
+  ピーク時メモリ。CI で計測し、悪化したら落とす
+- **クラッシュゼロを最優先KPIに置く**
 
 ---
 
-## 4. リリース計画（案）
+## 4. iPadファーストの具体的要件（v1.0 必須）
 
-| フェーズ | 内容 | 目安 |
-|---|---|---|
-| P0 | 一次データ再検証（`tools/appstore_probe.py`）、スコープ確定 | 数日 |
-| P1 | iPad版 v1.0: 再生・速度・ピッチ・ABループ・波形・マーカー・永続化 | — |
-| P2 | iPhone対応、バックグラウンド再生、EQ、メトロノーム | — |
-| P3 | Android版（機能を絞った移植） | — |
-| P4 | Mac版（Universal Purchase）、アドオン課金 | — |
+- [ ] 外部ディスプレイ（Stage Manager 経由の独立表示）— 譜面を客席側に出す用途
+- [ ] Split View / Slide Over（音源アプリや動画と並べる）
+- [ ] ハードウェアキーボード / フットペダルのショートカット（次/前ページ、セットリスト移動）
+- [ ] トラックパッド・マウスのポインタ対応
+- [ ] Apple Pencil（注釈、ダブルタップでツール切替）
+- [ ] 縦横両対応、見開き時のレイアウト
+- [ ] ダーク／反転表示、Dynamic Type、VoiceOver
 
 ---
 
@@ -83,11 +77,13 @@
 ipad001/
 ├── README.md
 ├── docs/
-│   ├── research.md        # 競合・市場調査
-│   ├── monetization.md    # 収益化概算
+│   ├── decision.md        # ★ 最終決定
+│   ├── verification.md    # 再調査と初回結論の訂正
+│   ├── research.md        # 初回調査（一部否定済み）
+│   ├── monetization.md    # 収益概算（単位経済のみ有効）
 │   └── tech-plan.md       # 本ファイル
 ├── tools/
-│   └── appstore_probe.py  # 評価・レビューの一次データ取得
+│   └── appstore_probe.py  # 一次データ取得（discover / check / search）
 ├── ios/                   # (P1〜) Swift / SwiftUI
-└── android/               # (P3〜) Kotlin / Compose
+└── android/               # (P4〜) Kotlin / Compose
 ```
