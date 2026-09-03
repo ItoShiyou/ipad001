@@ -34,14 +34,10 @@ final class PerformanceViewModel {
     private(set) var isWaitingForRender = false
 
     /// 見開き表示（FR-10）。
-    var isTwoPageSpread = false {
-        didSet {
-            guard isTwoPageSpread != oldValue else { return }
-            displayedSecondaryPage = nil
-            showCachedPageIfAvailable()
-            refreshWindow()
-        }
-    }
+    ///
+    /// 変更の反映は `spreadModeChanged()` を呼んで行う。`@Observable` は
+    /// プロパティを計算プロパティへ変換するため、`didSet` を当てにしない。
+    var isTwoPageSpread = false
     /// 暗所用の反転表示（FR-13）。
     var isInverted = false
     /// 注釈レイヤの表示（FR-42）。
@@ -92,6 +88,13 @@ final class PerformanceViewModel {
             return (index, setlist.orderedItems.count)
         }
         return nil
+    }
+
+    /// 見開きの切り替え後に呼ぶ。窓の広さが変わるため描き直しが要る。
+    func spreadModeChanged() {
+        displayedSecondaryPage = nil
+        showCachedPageIfAvailable()
+        refreshWindow()
     }
 
     // MARK: - 表示寸法

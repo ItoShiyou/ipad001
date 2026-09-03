@@ -211,11 +211,14 @@ actor PageRenderer {
 
     // MARK: - 補助
 
+    /// `preferred()` は trait collection を読むためメインアクタに縛られうる。
+    /// この actor はメインスレッドの外で回すので、素の format を自分で組む。
     private static func format() -> UIGraphicsImageRendererFormat {
-        let format = UIGraphicsImageRendererFormat.preferred()
+        let format = UIGraphicsImageRendererFormat()
         // スケールは呼び出し側が RenderKey で決めている。ここで二重に掛けない。
         format.scale = 1
         format.opaque = true
+        format.preferredRange = .standard
         return format
     }
 

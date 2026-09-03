@@ -89,6 +89,9 @@ struct PerformanceView: View {
             .onChange(of: proxy.size) { _, newSize in
                 model.updateLayout(size: newSize, scale: displayScale)
             }
+            .onChange(of: model.isTwoPageSpread) { _, _ in
+                model.spreadModeChanged()
+            }
         }
         .background(.black)
         .statusBarHidden()

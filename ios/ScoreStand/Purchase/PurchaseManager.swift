@@ -55,21 +55,27 @@ final class PurchaseManager {
     private(set) var product: Product?
     private(set) var purchaseState: PurchaseState = .idle
 
-    private var updatesTask: Task<Void, Never>?
+    /// 監視タスクの入れ物。
+    ///
+    /// `deinit` は nonisolated なので、メインアクタに束縛された保存プロパティを
+    /// 直接触れない。取り消しだけを担う小さな箱に逃がし、箱自身の `deinit` で
+    /// 片付ける。書き込みは `init` の一度きりなので、境界を跨いだ競合は起きない。
+    private final class UpdatesTaskHolder: @unchecked Sendable {
+        var task: Task<Void, Never>?
+        deinit { task?.cancel() }
+    }
+
+    private let updates = UpdatesTaskHolder()
 
     init() {
         // オフライン起動でも即座に解放状態を確定させるため、まずローカルフラグを読む。
         self.isUnlocked = UserDefaults.standard.bool(forKey: Self.unlockedDefaultsKey)
         // アプリ生存期間中、返金・失効・他端末での購入を継続的に反映する。
-        self.updatesTask = Task { [weak self] in
+        updates.task = Task { [weak self] in
             for await update in Transaction.updates {
                 await self?.handle(updateResult: update)
             }
         }
-    }
-
-    deinit {
-        updatesTask?.cancel()
     }
 
     /// ストアからプロダクト情報を取得する。表示前に呼ぶ。
