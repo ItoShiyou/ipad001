@@ -33,6 +33,10 @@ struct AnnotationCanvasView: UIViewRepresentable {
     }
 
     func updateUIView(_ canvas: PKCanvasView, context: Context) {
+        // Coordinator が保持する parent（＝ onDrawingChanged クロージャ）を、
+        // 毎回の再構成で必ず最新に差し替える。ここを怠ると保存先のページが
+        // 固定されたままになる（Coordinator 側のコメント参照）。
+        context.coordinator.parent = self
         // 外部から drawing が更新された場合のみ反映する（無限ループ防止）。
         if canvas.drawing != drawing {
             canvas.drawing = drawing
@@ -61,7 +65,11 @@ struct AnnotationCanvasView: UIViewRepresentable {
         /// このキャンバス専用のツールピッカー。共有インスタンスに頼らないことで、
         /// 複数のキャンバスが同時に存在しても状態が混ざらない。
         let toolPicker = PKToolPicker()
-        private let parent: AnnotationCanvasView
+        /// `updateUIView` のたびに書き換える。`let` のままにして初回の値に
+        /// 固定してしまうと、ページが変わっても `onDrawingChanged` が
+        /// 最初のページ用のクロージャのままになり、以降の保存先がずっと
+        /// 最初のページに固定される事故になる。
+        var parent: AnnotationCanvasView
         // 1ストロークごとに保存すると I/O が頻発して重くなるため、
         // 描画がしばらく止まったタイミングでまとめて1回だけ通知する（デバウンス）。
         private var debounceWorkItem: DispatchWorkItem?
@@ -75,9 +83,15 @@ struct AnnotationCanvasView: UIViewRepresentable {
             let drawing = canvasView.drawing
             parent.drawing = drawing
 
+            // 保存先のクロージャは「今ストロークが起きた瞬間」の parent から取り出して
+            // 固定する。デバウンス発火時（0.6秒後）に self.parent を読み直すと、
+            // その間にページがめくられていた場合、正しいページの描画データを
+            // 別の（めくった後の）ページへ保存してしまう。
+            let callback = parent.onDrawingChanged
+
             debounceWorkItem?.cancel()
-            let workItem = DispatchWorkItem { [weak self] in
-                self?.parent.onDrawingChanged(drawing.dataRepresentation())
+            let workItem = DispatchWorkItem {
+                callback(drawing.dataRepresentation())
             }
             debounceWorkItem = workItem
             DispatchQueue.main.asyncAfter(deadline: .now() + debounceInterval, execute: workItem)

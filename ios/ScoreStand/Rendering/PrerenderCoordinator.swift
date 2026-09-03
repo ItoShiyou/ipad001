@@ -35,7 +35,11 @@ final class PrerenderCoordinator {
 
         Task { await cache.retain(addresses) }
 
-        let ordered = descriptors.sorted { lhs, _ in lhs.pageIndex == currentPageIndex }
+        var ordered = descriptors
+        if let currentIndex = ordered.firstIndex(where: { $0.pageIndex == currentPageIndex }) {
+            let current = ordered.remove(at: currentIndex)
+            ordered.insert(current, at: 0)
+        }
         for descriptor in ordered {
             schedule(descriptor, key: key)
         }

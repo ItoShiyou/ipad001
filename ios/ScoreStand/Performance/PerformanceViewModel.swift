@@ -146,7 +146,15 @@ final class PerformanceViewModel {
 
         currentPageIndex = index
         score.lastPageIndex = index
-        displayedSecondaryPage = nil
+        // NFR-01: ここから、表示中のページが実際に差し替わるまでを計測する。
+        Metrics.beginPageTurn()
+        // 白紙より古い表示を優先する方針（ファイル冒頭コメント）は右ページにも適用する。
+        // 次の見開きに右ページが存在しないときだけ、ここで確実に消しておく。
+        if PerformanceViewModel.shouldClearSecondaryPage(
+            isTwoPageSpread: isTwoPageSpread, primaryIndex: currentPageIndex, pageCount: score.pageCount
+        ) {
+            displayedSecondaryPage = nil
+        }
         showCachedPageIfAvailable()
         refreshWindow()
     }
@@ -160,6 +168,11 @@ final class PerformanceViewModel {
         context = .setlist(setlist, index: next)
         currentPageIndex = landingOnLastPage ? max(0, nextScore.pageCount - 1) : 0
         displayedPage = nil
+        if PerformanceViewModel.shouldClearSecondaryPage(
+            isTwoPageSpread: isTwoPageSpread, primaryIndex: currentPageIndex, pageCount: nextScore.pageCount
+        ) {
+            displayedSecondaryPage = nil
+        }
         showCachedPageIfAvailable()
         refreshWindow()
     }
@@ -195,6 +208,8 @@ final class PerformanceViewModel {
             ), index == currentPageIndex {
                 displayedPage = page
                 isWaitingForRender = false
+                Metrics.endPageTurn()
+                Metrics.endColdStartIfNeeded()
             }
             if spread, index + 1 < score.pageCount,
                let right = await coordinator.cachedPage(
@@ -211,9 +226,20 @@ final class PerformanceViewModel {
         if page.pageIndex == currentPageIndex {
             displayedPage = page
             isWaitingForRender = false
+            Metrics.endPageTurn()
+            Metrics.endColdStartIfNeeded()
         } else if isTwoPageSpread, page.pageIndex == currentPageIndex + 1 {
             displayedSecondaryPage = page
         }
+    }
+
+    /// 見開きの右ページを、遷移直後に消してよいか。
+    ///
+    /// 単ページ表示、または遷移先に右ページが存在しない（曲の最終ページ）ときだけ
+    /// 消す。それ以外は新しい右ページが用意できるまで古い内容を出したままにして、
+    /// 白紙のチラつきを避ける（ファイル冒頭コメントの方針）。
+    nonisolated static func shouldClearSecondaryPage(isTwoPageSpread: Bool, primaryIndex: Int, pageCount: Int) -> Bool {
+        !isTwoPageSpread || primaryIndex + 1 >= pageCount
     }
 
     // MARK: - 生存期間

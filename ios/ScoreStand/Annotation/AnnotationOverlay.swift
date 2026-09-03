@@ -25,7 +25,12 @@ struct AnnotationOverlay: View {
                     drawing: $drawing,
                     isToolPickerVisible: isEditing,
                     isLayerVisible: true,
-                    onDrawingChanged: { _ in
+                    onDrawingChanged: { [score, pageIndex] data in
+                        // `@State var drawing` を読まず、渡された `data` をそのまま使う。
+                        // `drawing` は生きた共有ストレージなので、デバウンス発火が
+                        // ページ送りの後にずれ込むと別ページの内容を読んでしまう。
+                        // `score` / `pageIndex` もこの時点の値に固定して閉じ込める。
+                        guard let drawing = try? PKDrawing(data: data) else { return }
                         store?.saveDrawing(drawing, for: score, pageIndex: pageIndex)
                     }
                 )

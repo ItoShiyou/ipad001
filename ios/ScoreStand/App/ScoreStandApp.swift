@@ -7,6 +7,9 @@ struct ScoreStandApp: App {
     @State private var environment: AppEnvironment
 
     init() {
+        // NFR-02（起動2秒）は起動直後のここが計測開始点。譜面が最初に
+        // 表示された瞬間に PerformanceViewModel 側で閉じる。
+        Metrics.beginColdStart()
         do {
             let container = try ModelContainer(
                 for: Score.self, PageSource.self, PageSetting.self,
