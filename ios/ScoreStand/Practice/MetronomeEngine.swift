@@ -18,12 +18,22 @@ final class MetronomeEngine {
     private(set) var currentBeat = 0
 
     /// 1分あたりの拍数。
+    ///
+    /// `didSet` 内で自分自身に代入すると、クランプ後の値が現在値と同じでも
+    /// 必ずもう一度 `didSet` が呼ばれ、無限再帰でスタックオーバーフローする。
+    /// 変化があるときだけ代入することで再帰を1回で止める。
     var bpm: Int = 120 {
-        didSet { bpm = bpm.clamped(to: Self.bpmRange) }
+        didSet {
+            let clamped = bpm.clamped(to: Self.bpmRange)
+            if clamped != bpm { bpm = clamped }
+        }
     }
-    /// 1小節の拍数（拍子の分子）。
+    /// 1小節の拍数（拍子の分子）。理由は `bpm` と同じ。
     var beatsPerBar: Int = 4 {
-        didSet { beatsPerBar = max(1, min(beatsPerBar, 16)) }
+        didSet {
+            let clamped = max(1, min(beatsPerBar, 16))
+            if clamped != beatsPerBar { beatsPerBar = clamped }
+        }
     }
     var accentFirstBeat: Bool = true
 
