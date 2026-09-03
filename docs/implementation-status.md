@@ -73,7 +73,7 @@
 | FR-71 | 買い切りで解放 | `Purchase/PurchaseManager.swift` | ✅ |
 | FR-72 | Universal Purchase | 単一の非消費型IAP | ✅ |
 | FR-73 | 復元・オフライン保持 | `Purchase/PurchaseManager.swift` | ✅ ローカルフラグで先に解放判定 |
-| NFR-03 | 3ページのみ保持 | `Rendering/PageCache.swift` | ✅ |
+| NFR-03 | 3ページのみ保持 | `Rendering/PageCache.swift` | ⚠️ 単ページ表示では3枚。**見開き表示では最大5枚**（現在の見開き2枚＋前1枚＋次の見開き2枚）。`PageCache` 自体は上限を持たず、`PerformanceViewModel.refreshWindow` が渡す窓の大きさがそのまま保持数になる。要件文言（3ページのみ）と食い違うため、見開き時の挙動として妥当と判断するなら要件側の文言を直すべき |
 | NFR-05 | 演奏中は背景処理を止める | `Performance/PerformanceSession.swift` | ✅ 仕組みは実装。**呼び出し側の網羅は要確認** |
 | NFR-06 | 演奏中はスリープしない | 同上 | ✅ |
 | NFR-07 | ネットワークを使わない | `Info.plist` に用途説明キーなし、`URLSession` 不参照 | ✅ |

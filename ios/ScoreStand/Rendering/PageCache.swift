@@ -2,16 +2,17 @@ import Foundation
 
 /// 描画済みページの保持庫。
 ///
-/// **保持するのは「前・現在・次」の3枚だけ**（NFR-03）。
-/// 500ページのPDFでも常用メモリが一定に収まるのは、ここで上限を切っているため。
-/// 余分に持てば先読みは楽になるが、大判楽譜でメモリ警告を受けて落ちる方が本番では致命的である。
+/// このクラス自体は上限を持たない。実際に何ページ保持されるかは、
+/// 呼び出し側が `retain(_:)` に渡す集合（＝「今必要な窓」）で決まる。
+/// 単ページ表示では「前・現在・次」の3枚（NFR-03）、見開き表示では
+/// 現在の見開き2枚＋前1枚＋次の見開き2枚の最大5枚になる
+/// （`PerformanceViewModel.refreshWindow` 参照）。
+/// 500ページのPDFでも常用メモリが一定に収まるのは、この「窓の外は即座に捨てる」
+/// 方式のため。窓自体を無制限に広げない限り、ページ数によらず上限は一定である。
 actor PageCache {
     private var entries: [PageAddress: RenderedPage] = [:]
-    private let capacity: Int
 
-    init(capacity: Int = 3) {
-        self.capacity = capacity
-    }
+    init() {}
 
     func page(at address: PageAddress) -> RenderedPage? {
         entries[address]
