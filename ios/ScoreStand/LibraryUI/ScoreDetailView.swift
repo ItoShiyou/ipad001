@@ -8,6 +8,7 @@ struct ScoreDetailView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var tagsText: String = ""
     @State private var isPerformancePresented = false
+    @State private var isPracticeToolsPresented = false
 
     var body: some View {
         Form {
@@ -18,6 +19,12 @@ struct ScoreDetailView: View {
                     Label("演奏を開始", systemImage: "play.fill")
                 }
                 .disabled(score.pageCount == 0)
+
+                Button {
+                    isPracticeToolsPresented = true
+                } label: {
+                    Label("練習ツール（メトロノーム・チューナー）", systemImage: "metronome")
+                }
             }
 
             Section("メタデータ") {
@@ -42,6 +49,8 @@ struct ScoreDetailView: View {
                 .disabled(score.pageCount == 0)
             }
 
+            jumpPointsSection
+
             Section("情報") {
                 LabeledContent("ページ数", value: "\(score.pageCount)")
                 ForEach(score.sources.sorted(by: { $0.order < $1.order }), id: \.id) { source in
@@ -62,6 +71,62 @@ struct ScoreDetailView: View {
         }
         .fullScreenCover(isPresented: $isPerformancePresented) {
             PerformanceLauncherView(context: .single(score))
+        }
+        .sheet(isPresented: $isPracticeToolsPresented) {
+            PracticeToolsView(score: score)
+        }
+    }
+
+    /// FR-26（ベータ）: リピート / D.S. / Coda などのジャンプ先を登録する。
+    private var jumpPointsSection: some View {
+        Section {
+            ForEach(score.jumpPoints.sorted(by: { $0.order < $1.order }), id: \.id) { point in
+                HStack {
+                    TextField("ラベル（D.S. / Coda など）", text: labelBinding(for: point))
+                    Spacer()
+                    Stepper(value: pageIndexBinding(for: point), in: 0...max(0, score.pageCount - 1)) {
+                        Text("\(point.pageIndex + 1)ページ目")
+                            .foregroundStyle(.secondary)
+                            .font(.footnote)
+                    }
+                }
+            }
+            .onDelete(perform: deleteJumpPoints)
+
+            Button {
+                addJumpPoint()
+            } label: {
+                Label("ジャンプ先を追加", systemImage: "plus")
+            }
+            .disabled(score.pageCount == 0)
+        } header: {
+            Text("ジャンプ先（ベータ）")
+        } footer: {
+            Text("演奏中に1操作で飛べます。リピート・D.S.・Coda などの登録に使ってください。")
+        }
+    }
+
+    private func labelBinding(for point: JumpPoint) -> Binding<String> {
+        Binding(get: { point.label }, set: { point.label = $0 })
+    }
+
+    private func pageIndexBinding(for point: JumpPoint) -> Binding<Int> {
+        Binding(get: { point.pageIndex }, set: { point.pageIndex = $0 })
+    }
+
+    private func addJumpPoint() {
+        let point = JumpPoint(label: "新しいジャンプ先", pageIndex: 0, order: score.jumpPoints.count)
+        point.score = score
+        score.jumpPoints.append(point)
+        modelContext.insert(point)
+    }
+
+    private func deleteJumpPoints(at offsets: IndexSet) {
+        let points = score.jumpPoints.sorted(by: { $0.order < $1.order })
+        for index in offsets {
+            let point = points[index]
+            score.jumpPoints.removeAll { $0.id == point.id }
+            modelContext.delete(point)
         }
     }
 }

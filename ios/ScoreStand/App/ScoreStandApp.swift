@@ -13,7 +13,7 @@ struct ScoreStandApp: App {
         do {
             let container = try ModelContainer(
                 for: Score.self, PageSource.self, PageSetting.self,
-                AnnotationLayer.self, Setlist.self, SetlistItem.self
+                AnnotationLayer.self, Setlist.self, SetlistItem.self, JumpPoint.self
             )
             self.container = container
             _environment = State(initialValue: AppEnvironment(modelContext: container.mainContext))

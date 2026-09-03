@@ -33,7 +33,7 @@ final class LibraryArchive {
         scores: [Score],
         setlists: [Setlist],
         to url: URL,
-        progress: (@MainActor (Double) -> Void)? = nil
+        progress: (@MainActor @Sendable (Double) -> Void)? = nil
     ) async throws {
         let needsScope = url.startAccessingSecurityScopedResource()
         defer { if needsScope { url.stopAccessingSecurityScopedResource() } }
@@ -179,7 +179,7 @@ final class LibraryArchive {
     /// `async` なのは export と同じ理由で、書庫の展開がファイル I/O だからである。
     func importArchive(
         from url: URL,
-        progress: (@MainActor (Double) -> Void)? = nil
+        progress: (@MainActor @Sendable (Double) -> Void)? = nil
     ) async throws -> (scoreCount: Int, setlistCount: Int) {
         let needsScope = url.startAccessingSecurityScopedResource()
         defer { if needsScope { url.stopAccessingSecurityScopedResource() } }

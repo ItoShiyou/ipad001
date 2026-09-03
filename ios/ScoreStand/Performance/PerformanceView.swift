@@ -59,6 +59,9 @@ struct PerformanceView: View {
                         if !model.setlistTitles.isEmpty {
                             setlistJumpBar
                         }
+                        if !model.jumpPoints.isEmpty {
+                            jumpPointsBar
+                        }
                     }
                     .transition(.move(edge: .top).combined(with: .opacity))
                 }
@@ -215,6 +218,31 @@ extension PerformanceView {
                                 index == model.setlistPosition?.index ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary),
                                 in: Capsule()
                             )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 12)
+        }
+        .background(.ultraThinMaterial)
+    }
+
+    /// リピート / D.S. / Coda などへ1操作で飛ぶ（FR-26、ベータ）。
+    /// セットリストのジャンプバーと同じ「大きな丸ボタンを横に並べる」形にして、
+    /// 暗所でも押しやすい面積を確保している。
+    fileprivate var jumpPointsBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+                ForEach(model.jumpPoints, id: \.id) { point in
+                    Button {
+                        model.goToPage(point.pageIndex)
+                    } label: {
+                        Text(point.label.isEmpty ? "\(point.pageIndex + 1)ページ目" : point.label)
+                            .lineLimit(1)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .background(.quaternary, in: Capsule())
                     }
                     .buttonStyle(.plain)
                 }

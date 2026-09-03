@@ -56,6 +56,14 @@ struct SetlistEditorView: View {
                     Label("曲を追加", systemImage: "plus")
                 }
             }
+            // FR-34（ベータ・C優先度）。テキストのみの書き出し。
+            // PDF化まではまだ対応していない。
+            ToolbarItem(placement: .navigationBarTrailing) {
+                ShareLink(item: exportText) {
+                    Label("書き出し（ベータ）", systemImage: "square.and.arrow.up")
+                }
+                .disabled(setlist.orderedItems.isEmpty)
+            }
         }
         .sheet(isPresented: $isAddScorePresented) {
             AddScoreToSetlistView(setlist: setlist) { save() }
@@ -68,6 +76,23 @@ struct SetlistEditorView: View {
         } message: { message in
             Text(message)
         }
+    }
+
+    /// FR-34（ベータ）: セットリストをテキストとして書き出す。
+    /// 曲順・曲名・作曲者・メモを1行ずつ並べるだけの単純な形式にしている。
+    private var exportText: String {
+        var lines = ["\(setlist.name.isEmpty ? "セットリスト" : setlist.name)", ""]
+        for (index, item) in setlist.orderedItems.enumerated() {
+            var line = "\(index + 1). \(item.score?.title ?? "（削除された曲）")"
+            if let composer = item.score?.composer, !composer.isEmpty {
+                line += "（\(composer)）"
+            }
+            lines.append(line)
+            if !item.note.isEmpty {
+                lines.append("   \(item.note)")
+            }
+        }
+        return lines.joined(separator: "\n")
     }
 
     private func setlistItemRow(_ item: SetlistItem) -> some View {

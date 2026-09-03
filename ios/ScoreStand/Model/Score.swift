@@ -34,6 +34,10 @@ final class Score {
     @Relationship(deleteRule: .cascade, inverse: \AnnotationLayer.score)
     var annotations: [AnnotationLayer] = []
 
+    /// リピート / D.S. / Coda などのジャンプ先（FR-26、ベータ）。
+    @Relationship(deleteRule: .cascade, inverse: \JumpPoint.score)
+    var jumpPoints: [JumpPoint] = []
+
     init(title: String, composer: String = "", ensemble: String = "", tags: [String] = []) {
         self.title = title
         self.composer = composer

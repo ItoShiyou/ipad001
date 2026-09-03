@@ -75,6 +75,11 @@ final class PerformanceViewModel {
         return setlist.orderedItems.map { $0.score?.title ?? "（削除された曲）" }
     }
 
+    /// リピート / D.S. / Coda などのジャンプ先（FR-26、ベータ）。
+    var jumpPoints: [JumpPoint] {
+        (score?.jumpPoints ?? []).sorted { $0.order < $1.order }
+    }
+
     /// セットリストの任意の曲へ飛ぶ。
     func jumpToSetlistItem(at index: Int) {
         guard case .setlist(let setlist, let current) = context else { return }
