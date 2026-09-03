@@ -20,6 +20,8 @@
 - [`docs/verification.md`](docs/verification.md) — 再調査による初回結論の訂正（なぜ結論が変わったか）
 - [`docs/research.md`](docs/research.md) — 初回の競合調査（**一部否定済み**）
 - [`docs/monetization.md`](docs/monetization.md) — 収益化概算（**単位経済のみ有効**）
+- [`docs/requirements.md`](docs/requirements.md) — 要件定義（レビュー用ドラフト）
+- [`docs/page-turn-input.md`](docs/page-turn-input.md) — 譜めくり入力の設計空間（**未決定・保持**）
 - [`docs/tech-plan.md`](docs/tech-plan.md) — 技術方針（電子楽譜リーダー）
 - [`tools/appstore_probe.py`](tools/appstore_probe.py) — 評価・レビューの一次データ取得スクリプト
 
