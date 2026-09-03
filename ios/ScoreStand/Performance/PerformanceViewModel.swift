@@ -28,11 +28,20 @@ final class PerformanceViewModel {
     private(set) var context: Context
     private(set) var currentPageIndex = 0
     private(set) var displayedPage: RenderedPage?
+    /// 見開き表示のときの右側ページ。単ページ表示では常に nil。
+    private(set) var displayedSecondaryPage: RenderedPage?
     /// 次のページがまだ描けていないときだけ立つ。UI は控えめな待ち表示に使う。
     private(set) var isWaitingForRender = false
 
     /// 見開き表示（FR-10）。
-    var isTwoPageSpread = false
+    var isTwoPageSpread = false {
+        didSet {
+            guard isTwoPageSpread != oldValue else { return }
+            displayedSecondaryPage = nil
+            showCachedPageIfAvailable()
+            refreshWindow()
+        }
+    }
     /// 暗所用の反転表示（FR-13）。
     var isInverted = false
     /// 注釈レイヤの表示（FR-42）。
@@ -63,6 +72,19 @@ final class PerformanceViewModel {
     var score: Score? { context.score }
 
     var pageCount: Int { score?.pageCount ?? 0 }
+
+    /// セットリスト上の曲名一覧。演奏中のジャンプUIに使う（FR-32）。
+    var setlistTitles: [String] {
+        guard case .setlist(let setlist, _) = context else { return [] }
+        return setlist.orderedItems.map { $0.score?.title ?? "（削除された曲）" }
+    }
+
+    /// セットリストの任意の曲へ飛ぶ。
+    func jumpToSetlistItem(at index: Int) {
+        guard case .setlist(let setlist, let current) = context else { return }
+        guard index != current, setlist.orderedItems.indices.contains(index) else { return }
+        moveScore(by: index - current)
+    }
 
     /// セットリスト上の位置。演奏ビューの見出しに出す。
     var setlistPosition: (index: Int, total: Int)? {
@@ -121,6 +143,7 @@ final class PerformanceViewModel {
 
         currentPageIndex = index
         score.lastPageIndex = index
+        displayedSecondaryPage = nil
         showCachedPageIfAvailable()
         refreshWindow()
     }
@@ -142,9 +165,11 @@ final class PerformanceViewModel {
 
     private func refreshWindow() {
         guard let score, let renderKey else { return }
+        // 見開きでは「今の見開き2枚」と「次の見開きの左」までを持つ。
+        // 前方向に厚く持つのは、譜めくりが前へ進む操作の方が圧倒的に多いため。
         var indices = [currentPageIndex - 1, currentPageIndex, currentPageIndex + 1]
         if isTwoPageSpread {
-            indices.append(currentPageIndex + 2)
+            indices.append(contentsOf: [currentPageIndex + 2, currentPageIndex + 3])
         }
         let descriptors = indices.compactMap {
             PageDescriptorFactory.make(score: score, pageIndex: $0)
@@ -159,25 +184,33 @@ final class PerformanceViewModel {
     private func showCachedPageIfAvailable() {
         guard let score, let renderKey else { return }
         let index = currentPageIndex
+        let spread = isTwoPageSpread
         isWaitingForRender = true
         Task {
             if let page = await coordinator.cachedPage(
-                scoreID: score.id,
-                pageIndex: index,
-                key: renderKey
+                scoreID: score.id, pageIndex: index, key: renderKey
             ), index == currentPageIndex {
                 displayedPage = page
                 isWaitingForRender = false
+            }
+            if spread, index + 1 < score.pageCount,
+               let right = await coordinator.cachedPage(
+                scoreID: score.id, pageIndex: index + 1, key: renderKey
+               ), index == currentPageIndex {
+                displayedSecondaryPage = right
             }
         }
     }
 
     private func pageBecameReady(_ page: RenderedPage) {
-        guard page.pageIndex == currentPageIndex,
-              page.scoreID == score?.id,
-              page.renderKey == renderKey else { return }
-        displayedPage = page
-        isWaitingForRender = false
+        guard page.scoreID == score?.id, page.renderKey == renderKey else { return }
+
+        if page.pageIndex == currentPageIndex {
+            displayedPage = page
+            isWaitingForRender = false
+        } else if isTwoPageSpread, page.pageIndex == currentPageIndex + 1 {
+            displayedSecondaryPage = page
+        }
     }
 
     // MARK: - 生存期間

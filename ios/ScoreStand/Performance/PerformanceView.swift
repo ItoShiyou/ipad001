@@ -32,7 +32,11 @@ struct PerformanceView: View {
     var body: some View {
         GeometryReader { proxy in
             ZStack(alignment: .top) {
-                PageImageView(page: model.displayedPage, isInverted: model.isInverted)
+                PageImageView(
+                    page: model.displayedPage,
+                    secondaryPage: model.displayedSecondaryPage,
+                    isInverted: model.isInverted
+                )
                     .contentShape(Rectangle())
                     .onTapGesture { location in
                         tapSource.handleTap(at: location.x, width: proxy.size.width)
@@ -44,14 +48,23 @@ struct PerformanceView: View {
                     AnnotationOverlay(
                         score: score,
                         pageIndex: model.currentPageIndex,
-                        isEditing: isAnnotating,
+                        isEditing: isAnnotating && !session.isLocked,
                         isVisible: model.showsAnnotations
                     )
                 }
 
                 if showsControls {
-                    controlBar
-                        .transition(.move(edge: .top).combined(with: .opacity))
+                    VStack(spacing: 0) {
+                        controlBar
+                        if !model.setlistTitles.isEmpty {
+                            setlistJumpBar
+                        }
+                    }
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+
+                if session.isLocked {
+                    lockIndicator
                 }
 
                 if model.isWaitingForRender {
@@ -97,6 +110,8 @@ struct PerformanceView: View {
                 guard abs(value.translation.width) > abs(value.translation.height) else {
                     // 縦方向の大きなスワイプは操作バーの開閉に使う。
                     // 譜めくりと衝突しない軸を選んでいる。
+                    // ロック中は開かない（FR-25: 譜めくり以外を無効化する）。
+                    guard !session.isLocked else { return }
                     withAnimation(.easeOut(duration: 0.15)) { showsControls.toggle() }
                     return
                 }
@@ -156,6 +171,12 @@ struct PerformanceView: View {
             // FR-25: 誤操作防止ロック。譜めくり以外を止める。
             Button {
                 session.isLocked.toggle()
+                if session.isLocked {
+                    // ロックした瞬間に、譜めくり以外の状態から抜けておく。
+                    // 「ロックしたのに書き込みモードのままだった」が本番では事故になる。
+                    isAnnotating = false
+                    withAnimation(.easeOut(duration: 0.15)) { showsControls = false }
+                }
             } label: {
                 Label(
                     session.isLocked ? "ロック中" : "ロック",
@@ -169,6 +190,53 @@ struct PerformanceView: View {
         .padding(.vertical, 12)
         .background(.ultraThinMaterial)
         .foregroundStyle(.primary)
+    }
+}
+
+extension PerformanceView {
+    /// 演奏中にセットリストの任意の曲へ飛ぶ（FR-32）。
+    ///
+    /// 曲名を大きめの丸ボタンで横に並べているのは、暗所で狙って押せる面積が要るため。
+    fileprivate var setlistJumpBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+                ForEach(Array(model.setlistTitles.enumerated()), id: \.offset) { index, title in
+                    Button {
+                        model.jumpToSetlistItem(at: index)
+                    } label: {
+                        Text("\(index + 1). \(title)")
+                            .lineLimit(1)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .background(
+                                index == model.setlistPosition?.index ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary),
+                                in: Capsule()
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 12)
+        }
+        .background(.ultraThinMaterial)
+    }
+
+    /// ロック中であることの控えめな表示。
+    ///
+    /// 解除を長押しにしているのは、ロックの目的が誤タップ防止だからである。
+    /// タップで解除できるなら、そもそも誤タップから守れない。
+    fileprivate var lockIndicator: some View {
+        Image(systemName: "lock.fill")
+            .font(.caption)
+            .padding(8)
+            .background(.ultraThinMaterial, in: Circle())
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+            .padding()
+            .onLongPressGesture(minimumDuration: 1.0) {
+                session.isLocked = false
+            }
+            .accessibilityLabel("ロック中。長押しで解除")
     }
 }
 

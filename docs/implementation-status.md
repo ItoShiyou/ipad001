@@ -33,7 +33,7 @@ Swift ツールチェーン自体もこの環境に存在しないため、原�
 | FR-04 | メタデータ | `Model/Score.swift`, `LibraryUI/ScoreDetailView.swift` | ✅ |
 | FR-05 | 絞り込み・並べ替え | `LibraryUI/LibraryView.swift` | ✅ |
 | FR-07 | 削除は確認を伴う | 同上（確認ダイアログ） | ✅ |
-| FR-10 | 単ページ / 見開き | `Performance/PerformanceViewModel.swift` | ⚠️ 状態は保持するが、見開きの**二枚並べ描画は未実装**（現状は1枚表示のまま） |
+| FR-10 | 単ページ / 見開き | `Performance/PerformanceViewModel.swift`, `PageImageView.swift` | ✅ 二枚並べ描画に対応。見開き時は次の見開きの左ページまで先読みする |
 | FR-11 | 余白の自動検出とトリミング | `Crop/MarginDetector.swift`, `Crop/PageCropView.swift`, `Crop/ScoreCropListView.swift` | ✅ |
 | FR-13 | 反転表示 | `Performance/PageImageView.swift` | ✅ |
 | FR-16 | 縦横で破綻しない | `Resources/Info.plist`, 各ビュー | ✅ |
@@ -41,12 +41,12 @@ Swift ツールチェーン自体もこの環境に存在しないため、原�
 | FR-21 | BLEフットペダル | `Input/KeyboardInputSource.swift` | ✅ HIDキーボードとして受ける |
 | FR-22 | キーボードショートカット | 同上 + `Performance/PerformanceView.swift` | ✅ |
 | FR-24 | 前後1ページを事前描画 | `Rendering/PrerenderCoordinator.swift` | ✅ 設計済み・**未計測** |
-| FR-25 | 誤操作防止ロック | `Performance/PerformanceSession.swift` | ⚠️ 状態は持つが、**ロック時の入力抑止が未配線** |
+| FR-25 | 誤操作防止ロック | `PerformanceSession.swift`, `PerformanceView.swift` | ✅ 譜めくりは残し、それ以外（操作バー・注釈編集）を止める。解除は長押し |
 | FR-28 | 汎用BTリモコン | `Input/KeyboardInputSource.swift` | ✅ |
 | FR-29b | 広いタップ領域 | `Input/TapInputSource.swift`（左右1/3） | ✅ |
 | FR-30 | セットリストの作成・編集 | `SetlistUI/` | ✅ |
 | FR-31 | 曲間の連続送り | `Performance/PerformanceViewModel.swift` | ✅ |
-| FR-32 | 任意の曲へ飛ぶ | `SetlistUI/SetlistEditorView.swift` | ⚠️ 編集画面からは可能。**演奏中の曲間ジャンプUIが未実装** |
+| FR-32 | 任意の曲へ飛ぶ | `Performance/PerformanceView.swift` | ✅ 演奏中に曲名の横並びから飛べる |
 | FR-40 | 手書き注釈 | `Annotation/` | ✅ |
 | FR-41 | 元PDFを改変しない | `Annotation/AnnotationOverlay.swift` | ✅ 構造で保証 |
 | FR-42 | 注釈の表示切替 | 同上 | ✅ |
@@ -62,13 +62,14 @@ Swift ツールチェーン自体もこの環境に存在しないため、原�
 | NFR-06 | 演奏中はスリープしない | 同上 | ✅ |
 | NFR-07 | ネットワークを使わない | `Info.plist` に用途説明キーなし、`URLSession` 不参照 | ✅ |
 
-### 残っている M の穴（次にやること）
+### M 要件は一通り実装済み
 
-1. **FR-10 見開きの二枚並べ描画** — 状態とキャッシュ（4ページ分）は用意済み。表示側が未対応。
-2. **FR-25 ロック時の入力抑止** — `PerformanceSession.isLocked` を `PageTurnInputHub` が見ていない。
-3. **FR-32 演奏中の曲間ジャンプUI** — `PageTurnCommand.jump` と `.nextScore` は実装済みで、UIだけが無い。
+**ただし「実装済み」＝「動作確認済み」ではない。** 上の警告のとおり一度もビルドしていない。
+次にやるべきは機能追加ではなく、**ビルドを通し、実機で性能を測ること**（スパイク SP-1）。
 
-いずれも既存の型に乗るだけで、設計変更は要らない。
+なお FR-25 は当初「ロック時に入力を止める」と読んでいたが、要件の文言は
+「譜めくり**以外**を無効化」である。したがって**ロック中も譜めくりは動く**。
+誤タップから守る目的なので、これが正しい。解除をタップにすると誤タップで解除されてしまうため長押しにした。
 
 ---
 
