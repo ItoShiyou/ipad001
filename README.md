@@ -42,6 +42,33 @@
 
 詳細は [`docs/verification.md`](docs/verification.md) を参照。
 
+## 次にやること — 一次データの取得（依頼者の手元で実行）
+
+この環境からは Apple のドメインに到達できないため、**星評価の一次データはローカルで取る必要がある。**
+`tools/appstore_probe.py` は Python 3.9+ の標準ライブラリのみで動く（インストール不要）。
+
+```bash
+git clone <このリポジトリ> && cd ipad001
+
+# ① 発掘 ← 本命。「評価3.2〜3.8 かつ 有料 かつ iPad対応」のアプリを横断的に探す
+python3 tools/appstore_probe.py discover --country jp --csv jp.csv
+python3 tools/appstore_probe.py discover --country us --csv us.csv
+
+# ② 検証。docs/ で言及した既存候補の現在値と否定的レビューを確定させる
+python3 tools/appstore_probe.py check --country jp --reviews 30 > check_jp.txt
+
+# ③ 名前からIDを解決したいとき
+python3 tools/appstore_probe.py search Piascore INKredible
+```
+
+**①の出力（または CSV）をそのまま貼り付けてもらえれば、実数値で再ランキングする。**
+該当が少なすぎる場合は `--band 3.0 4.0` や `--min-ratings 50` で条件を緩める。
+`discover` は約60個の検索語を舐めるので、完了まで1〜2分かかる。
+
+なぜ `discover` が重要か: 初回調査の失敗は「有名アプリを先に思いつき、後から評価を当てはめようとした」
+ことに起因する。`discover` は逆順で、**先に評価3.5前後の有料アプリを機械的に列挙してから
+中身を見る。** 依頼の条件をそのままクエリにしている。
+
 ## ⚠️ データの信頼性について
 
 本調査の実行環境はネットワーク egress ポリシーにより
