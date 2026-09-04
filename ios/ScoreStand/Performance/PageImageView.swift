@@ -38,7 +38,8 @@ struct PageImageView: View {
     }
 }
 
-private extension View {
+/// 反転表示（FR-13）の条件付き適用。譜面画像・注釈オーバーレイの両方から使う。
+extension View {
     @ViewBuilder
     func colorInvert(isEnabled: Bool) -> some View {
         if isEnabled {

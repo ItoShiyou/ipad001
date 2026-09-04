@@ -56,7 +56,8 @@ struct PerformanceView: View {
                         score: score,
                         pageIndex: model.currentPageIndex,
                         isEditing: isAnnotating && !session.isLocked,
-                        isVisible: model.showsAnnotations
+                        isVisible: model.showsAnnotations,
+                        isInverted: model.isInverted
                     )
                 }
 

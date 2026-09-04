@@ -13,6 +13,12 @@ struct AnnotationOverlay: View {
     /// 編集中か。false のときは表示だけで、指や Pencil の入力を一切受けない。
     let isEditing: Bool
     let isVisible: Bool
+    /// 譜面が反転表示（FR-13）のときは、注釈も一緒に反転する。
+    ///
+    /// 譜面だけ白黒反転して注釈の色はそのままだと、暗所で書き込みが
+    /// 埋もれて見えなくなる（実機で判明）。書き込んだ本人の意図した色が
+    /// 変わって見えるが、暗所での可読性を優先する。
+    var isInverted: Bool = false
 
     @Environment(\.modelContext) private var modelContext
     @State private var drawing = PKDrawing()
@@ -37,6 +43,7 @@ struct AnnotationOverlay: View {
                 // 編集していないときは入力を素通しする。
                 // これをしないと、注釈を表示したまま譜めくりのタップが効かなくなる。
                 .allowsHitTesting(isEditing)
+                .colorInvert(isEnabled: isInverted)
             }
         }
         .onAppear { load() }
