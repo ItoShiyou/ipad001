@@ -34,9 +34,4 @@ enum PageDescriptorFactory {
             rotation: setting?.rotation ?? 0
         )
     }
-
-    /// 前・現在・次の3枚分。NFR-03 の「3枚しか持たない」はここが起点。
-    static func window(score: Score, around pageIndex: Int) -> [PageDescriptor] {
-        [pageIndex - 1, pageIndex, pageIndex + 1].compactMap { make(score: score, pageIndex: $0) }
-    }
 }
