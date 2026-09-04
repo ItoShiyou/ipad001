@@ -20,6 +20,11 @@ struct PerformanceView: View {
     private static let brightnessLevels: [CGFloat] = [1.0, 0.6, 0.3, 0.12]
     @State private var originalBrightness: CGFloat = UIScreen.main.brightness
 
+    /// ページスクラバーをドラッグ中の一時的な値。ドラッグ中は毎ピクセルで
+    /// 実際のページ送り（先読み込み）を起こさず、指を離した瞬間だけ
+    /// `model.goToPage` を呼ぶ（P1: 演奏中の重い処理を避ける）。
+    @State private var scrubValue: Double?
+
     private let hub: PageTurnInputHub
     private let tapSource: TapInputSource
     private let keyboardSource: KeyboardInputSource
@@ -39,46 +44,70 @@ struct PerformanceView: View {
     var body: some View {
         GeometryReader { proxy in
             ZStack(alignment: .top) {
-                PageImageView(
-                    page: model.displayedPage,
-                    secondaryPage: model.displayedSecondaryPage,
-                    // 書き込み中は譜面も注釈も反転を止め、両方まとめて通常表示にする。
-                    // 譜面だけ反転したまま注釈だけ非反転にすると、書き込みを終えた
-                    // 瞬間に注釈の色だけ唐突に変わって見え、何が起きたか分からない
-                    // （実機で指摘）。書き込みモードの切り替えそのものを
-                    // 「反転⇔非反転が画面全体でまとまって起きる」動きにすることで、
-                    // 色の変化が反転のせいだと直感的に伝わるようにする。
-                    isInverted: model.isInverted && !isEffectivelyEditing
-                )
-                    .contentShape(Rectangle())
-                    .onTapGesture { location in
-                        tapSource.handleTap(at: location.x, width: proxy.size.width)
-                    }
-                    .gesture(swipeGesture)
+                // 常に画面全体を覆う黒背景。コントロールバー表示中は譜面側に
+                // 余白（padding）ができるが、そこもこの黒で埋まるので
+                // 見た目には継ぎ目が出ない。
+                Color.black.ignoresSafeArea()
 
-                // 注釈は譜面の上に重ねるだけで、譜面自体には触れない（FR-41）。
-                if let score = model.score {
-                    AnnotationOverlay(
-                        score: score,
-                        pageIndex: model.currentPageIndex,
-                        isEditing: isEffectivelyEditing,
-                        isVisible: model.showsAnnotations,
+                // 譜面と注釈は必ず同じ余白で一緒に縮小・移動させる。
+                // 片方だけ縮めると、書き込んだ位置が譜面とずれて見える。
+                //
+                // ヘッダー・フッターの分だけ本体を縮めるのは、手計測した高さを
+                // padding に渡す自前実装（GeometryReader + PreferenceKey）を
+                // 最初に試したが、実機で反映されないことがあった。
+                // `safeAreaInset` は同じ目的のために SwiftUI が用意している
+                // 標準の仕組みで、挿入したバーの実サイズぶん本体コンテンツの
+                // レイアウト領域を確実に縮めてくれるため、そちらに置き換えた。
+                ZStack {
+                    PageImageView(
+                        page: model.displayedPage,
+                        secondaryPage: model.displayedSecondaryPage,
+                        // 書き込み中は譜面も注釈も反転を止め、両方まとめて通常表示にする。
+                        // 譜面だけ反転したまま注釈だけ非反転にすると、書き込みを終えた
+                        // 瞬間に注釈の色だけ唐突に変わって見え、何が起きたか分からない
+                        // （実機で指摘）。書き込みモードの切り替えそのものを
+                        // 「反転⇔非反転が画面全体でまとまって起きる」動きにすることで、
+                        // 色の変化が反転のせいだと直感的に伝わるようにする。
                         isInverted: model.isInverted && !isEffectivelyEditing
                     )
-                }
+                        .contentShape(Rectangle())
+                        .onTapGesture { location in
+                            tapSource.handleTap(at: location.x, width: proxy.size.width)
+                        }
+                        .gesture(swipeGesture)
 
-                if showsControls {
-                    VStack(spacing: 0) {
-                        controlBar
-                        if !model.setlistTitles.isEmpty {
-                            setlistJumpBar
-                        }
-                        if !model.jumpPoints.isEmpty {
-                            jumpPointsBar
-                        }
+                    // 注釈は譜面の上に重ねるだけで、譜面自体には触れない（FR-41）。
+                    if let score = model.score {
+                        AnnotationOverlay(
+                            score: score,
+                            pageIndex: model.currentPageIndex,
+                            isEditing: isEffectivelyEditing,
+                            isVisible: model.showsAnnotations,
+                            isInverted: model.isInverted && !isEffectivelyEditing
+                        )
                     }
-                    .transition(.move(edge: .top).combined(with: .opacity))
                 }
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    if showsControls {
+                        VStack(spacing: 0) {
+                            controlBar
+                            if !model.setlistTitles.isEmpty {
+                                setlistJumpBar
+                            }
+                            if !model.jumpPoints.isEmpty {
+                                jumpPointsBar
+                            }
+                        }
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                    }
+                }
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    if showsControls, model.pageCount > 1 {
+                        pageScrubberBar
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                }
+                .animation(.easeOut(duration: 0.15), value: showsControls)
 
                 if session.isLocked {
                     lockIndicator
@@ -286,6 +315,44 @@ extension PerformanceView {
             .padding(.horizontal, 24)
             .padding(.bottom, 12)
         }
+        .background(.ultraThinMaterial)
+    }
+
+    /// ページを一気に飛べるスクラバー（実機での要望で追加）。
+    ///
+    /// 大判の楽譜では1ページずつ送るより、狙ったページ付近まで一気に
+    /// スライドできた方が速い。ドラッグ中は値をローカルの `scrubValue` に
+    /// 留めておき、指を離した瞬間にだけ `model.goToPage` を呼ぶ
+    /// （P1: ドラッグの1フレームごとに先読みを再計算させない）。
+    private var pageScrubberBar: some View {
+        let displayIndex = scrubValue.map(Int.init) ?? model.currentPageIndex
+        return VStack(spacing: 4) {
+            Text("\(displayIndex + 1) / \(max(model.pageCount, 1))")
+                .font(.footnote.monospacedDigit())
+                .foregroundStyle(.secondary)
+            Slider(
+                value: Binding(
+                    get: { scrubValue ?? Double(model.currentPageIndex) },
+                    set: { scrubValue = $0 }
+                ),
+                in: 0...Double(max(model.pageCount - 1, 0)),
+                step: 1,
+                onEditingChanged: { isEditing in
+                    if !isEditing, let scrubValue {
+                        model.goToPage(Int(scrubValue.rounded()))
+                    }
+                    self.scrubValue = nil
+                }
+            )
+            .disabled(session.isLocked)
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, 10)
+        // 下端ぎりぎりに置くと、iPadOS の Dock / App Switcher を呼ぶ
+        // 下端スワイプとドラッグ操作が競合する（上端のコントロールバー開閉で
+        // 一度経験した問題と同じ種類）。スライダーは特にドラッグの持続時間が
+        // 長く巻き込まれやすいため、下端から離す余白を通常より大きく取る。
+        .padding(.bottom, 28)
         .background(.ultraThinMaterial)
     }
 

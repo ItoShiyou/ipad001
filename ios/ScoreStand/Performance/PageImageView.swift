@@ -12,14 +12,17 @@ struct PageImageView: View {
     let isInverted: Bool
 
     var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-
-            HStack(spacing: 0) {
-                pageImage(page)
-                if let secondaryPage {
-                    pageImage(secondaryPage)
-                }
+        // 背景の黒は `PerformanceView` 側が画面全体に敷いているので、
+        // ここでは持たない。以前は `Color.black.ignoresSafeArea()` を
+        // ここに置いていたが、`ignoresSafeArea()` は親から渡された padding
+        // による縮小を無視して常に画面いっぱいに広がろうとするため、
+        // 結果としてこの ZStack 自体の実サイズが常に画面全体に戻ってしまい、
+        // コントロールバー表示中に譜面を縮めて全体を見せる機能が効かなかった
+        // （実機で判明）。
+        HStack(spacing: 0) {
+            pageImage(page)
+            if let secondaryPage {
+                pageImage(secondaryPage)
             }
         }
     }
