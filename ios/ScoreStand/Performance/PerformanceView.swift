@@ -42,7 +42,13 @@ struct PerformanceView: View {
                 PageImageView(
                     page: model.displayedPage,
                     secondaryPage: model.displayedSecondaryPage,
-                    isInverted: model.isInverted
+                    // 書き込み中は譜面も注釈も反転を止め、両方まとめて通常表示にする。
+                    // 譜面だけ反転したまま注釈だけ非反転にすると、書き込みを終えた
+                    // 瞬間に注釈の色だけ唐突に変わって見え、何が起きたか分からない
+                    // （実機で指摘）。書き込みモードの切り替えそのものを
+                    // 「反転⇔非反転が画面全体でまとまって起きる」動きにすることで、
+                    // 色の変化が反転のせいだと直感的に伝わるようにする。
+                    isInverted: model.isInverted && !isEffectivelyEditing
                 )
                     .contentShape(Rectangle())
                     .onTapGesture { location in
@@ -55,9 +61,9 @@ struct PerformanceView: View {
                     AnnotationOverlay(
                         score: score,
                         pageIndex: model.currentPageIndex,
-                        isEditing: isAnnotating && !session.isLocked,
+                        isEditing: isEffectivelyEditing,
                         isVisible: model.showsAnnotations,
-                        isInverted: model.isInverted
+                        isInverted: model.isInverted && !isEffectivelyEditing
                     )
                 }
 
@@ -121,6 +127,13 @@ struct PerformanceView: View {
     }
 
     @Environment(\.displayScale) private var displayScale
+
+    /// ロック中は書き込みモードに入れない（FR-25）ため、`isAnnotating` の
+    /// 値だけでは実際に編集可能かどうかを判定できない。1箇所にまとめて、
+    /// 譜面・注釈の反転判定で同じ条件を確実に使い回す。
+    private var isEffectivelyEditing: Bool {
+        isAnnotating && !session.isLocked
+    }
 
     private func cycleBrightness() {
         brightnessLevelIndex = (brightnessLevelIndex + 1) % Self.brightnessLevels.count
