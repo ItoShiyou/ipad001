@@ -16,8 +16,11 @@ struct AnnotationOverlay: View {
     /// 譜面が反転表示（FR-13）のときは、注釈も一緒に反転する。
     ///
     /// 譜面だけ白黒反転して注釈の色はそのままだと、暗所で書き込みが
-    /// 埋もれて見えなくなる（実機で判明）。書き込んだ本人の意図した色が
-    /// 変わって見えるが、暗所での可読性を優先する。
+    /// 埋もれて見えなくなる（実機で判明）。ただし**編集中は反転しない**。
+    /// 編集中まで反転すると、PKToolPicker で選んだ色（例: 赤）と実際に
+    /// 描かれて見える色（反転された補色）が食い違い、狙った色で書けなくなる
+    /// （これも実機で判明）。反転は「読む」ときだけの見た目の話であり、
+    /// 保存されるデータ自体は常に選んだ色そのままである。
     var isInverted: Bool = false
 
     @Environment(\.modelContext) private var modelContext
@@ -43,7 +46,7 @@ struct AnnotationOverlay: View {
                 // 編集していないときは入力を素通しする。
                 // これをしないと、注釈を表示したまま譜めくりのタップが効かなくなる。
                 .allowsHitTesting(isEditing)
-                .colorInvert(isEnabled: isInverted)
+                .colorInvert(isEnabled: isInverted && !isEditing)
             }
         }
         .onAppear { load() }
