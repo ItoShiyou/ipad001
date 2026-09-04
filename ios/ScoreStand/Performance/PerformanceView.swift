@@ -293,17 +293,31 @@ extension PerformanceView {
     ///
     /// 解除を長押しにしているのは、ロックの目的が誤タップ防止だからである。
     /// タップで解除できるなら、そもそも誤タップから守れない。
+    ///
+    /// 以前は `.frame(maxWidth: .infinity, maxHeight: .infinity)` の後に
+    /// `.onLongPressGesture` を付けており、`.contentShape` も無かったため
+    /// 当たり判定が不確実だった。背後の譜面ビュー（画面全体を覆うタップ・
+    /// スワイプジェスチャを持つ）と競合し、実機で長押しが認識されず
+    /// ロックから抜けられなくなる事故が起きた。円のアイコンそのものに
+    /// 明示的な `contentShape` を与え、VStack/HStack + Spacer で
+    /// 右上に配置することで、当たり判定の範囲をこの円だけに確実に絞る。
     fileprivate var lockIndicator: some View {
-        Image(systemName: "lock.fill")
-            .font(.caption)
-            .padding(8)
-            .background(.ultraThinMaterial, in: Circle())
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-            .padding()
-            .onLongPressGesture(minimumDuration: 1.0) {
-                session.isLocked = false
+        VStack {
+            HStack {
+                Spacer()
+                Image(systemName: "lock.fill")
+                    .font(.title2)
+                    .padding(16)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .contentShape(Circle())
+                    .onLongPressGesture(minimumDuration: 1.0) {
+                        session.isLocked = false
+                    }
+                    .accessibilityLabel("ロック中。長押しで解除")
             }
-            .accessibilityLabel("ロック中。長押しで解除")
+            Spacer()
+        }
+        .padding()
     }
 }
 
