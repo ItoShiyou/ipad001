@@ -25,6 +25,10 @@ struct PerformanceView: View {
     /// `model.goToPage` を呼ぶ（P1: 演奏中の重い処理を避ける）。
     @State private var scrubValue: Double?
 
+    /// `ScorePagingView` がドラッグ中かどうか。ドラッグ中は注釈が
+    /// 譜面と一緒に動かず取り残されて見えるため、その間だけ薄くする。
+    @State private var isDraggingScore = false
+
     private let hub: PageTurnInputHub
     private let tapSource: TapInputSource
     private let keyboardSource: KeyboardInputSource
@@ -59,24 +63,33 @@ struct PerformanceView: View {
                 // 標準の仕組みで、挿入したバーの実サイズぶん本体コンテンツの
                 // レイアウト領域を確実に縮めてくれるため、そちらに置き換えた。
                 ZStack {
-                    PageImageView(
-                        page: model.displayedPage,
-                        secondaryPage: model.displayedSecondaryPage,
-                        // 書き込み中は譜面も注釈も反転を止め、両方まとめて通常表示にする。
-                        // 譜面だけ反転したまま注釈だけ非反転にすると、書き込みを終えた
-                        // 瞬間に注釈の色だけ唐突に変わって見え、何が起きたか分からない
-                        // （実機で指摘）。書き込みモードの切り替えそのものを
-                        // 「反転⇔非反転が画面全体でまとまって起きる」動きにすることで、
-                        // 色の変化が反転のせいだと直感的に伝わるようにする。
-                        isInverted: model.isInverted && !isEffectivelyEditing
+                    // 譜面のページ送り（新規要望）: 縦置きは縦スクロール・単ページ、
+                    // 横置きは横スクロール・見開き2ページ。向きは
+                    // `PerformanceViewModel.updateLayout` が自動で決める（見開きの
+                    // 手動切替は廃止した）。
+                    //
+                    // 書き込み中は譜面も注釈も反転を止め、両方まとめて通常表示にする。
+                    // 譜面だけ反転したまま注釈だけ非反転にすると、書き込みを終えた
+                    // 瞬間に注釈の色だけ唐突に変わって見え、何が起きたか分からない
+                    // （実機で指摘）。書き込みモードの切り替えそのものを
+                    // 「反転⇔非反転が画面全体でまとまって起きる」動きにすることで、
+                    // 色の変化が反転のせいだと直感的に伝わるようにする。
+                    ScorePagingView(
+                        model: model,
+                        isEditing: isEffectivelyEditing,
+                        onTap: { x, width in
+                            tapSource.handleTap(at: x, width: width)
+                        },
+                        isDragging: $isDraggingScore
                     )
-                        .contentShape(Rectangle())
-                        .onTapGesture { location in
-                            tapSource.handleTap(at: location.x, width: proxy.size.width)
-                        }
-                        .gesture(swipeGesture)
+                    // `.simultaneousGesture` にしているのは、`.gesture` だと
+                    // 排他的に取り合ってしまい、`ScorePagingView` 内の
+                    // `ScrollView`（本来のページ送り）がドラッグを受け取れなくなるため。
+                    .simultaneousGesture(swipeGesture)
 
                     // 注釈は譜面の上に重ねるだけで、譜面自体には触れない（FR-41）。
+                    // ドラッグ中は譜面のスクロールに追従しないため、取り残されて
+                    // 見えないよう一時的に薄くする（止まったら元に戻る）。
                     if let score = model.score {
                         AnnotationOverlay(
                             score: score,
@@ -85,12 +98,17 @@ struct PerformanceView: View {
                             isVisible: model.showsAnnotations,
                             isInverted: model.isInverted && !isEffectivelyEditing
                         )
+                        .opacity(isDraggingScore ? 0.15 : 1)
+                        .animation(.easeOut(duration: 0.15), value: isDraggingScore)
                     }
                 }
                 .safeAreaInset(edge: .top, spacing: 0) {
                     if showsControls {
                         VStack(spacing: 0) {
                             controlBar
+                            if model.isAutoScrolling {
+                                autoScrollSpeedBar
+                            }
                             if !model.setlistTitles.isEmpty {
                                 setlistJumpBar
                             }
@@ -136,9 +154,6 @@ struct PerformanceView: View {
             .onChange(of: proxy.size) { _, newSize in
                 model.updateLayout(size: newSize, scale: displayScale)
             }
-            .onChange(of: model.isTwoPageSpread) { _, _ in
-                model.spreadModeChanged()
-            }
         }
         .background(.black)
         .statusBarHidden()
@@ -169,18 +184,21 @@ struct PerformanceView: View {
         UIScreen.main.brightness = Self.brightnessLevels[brightnessLevelIndex]
     }
 
+    /// コントロールバーの開閉スワイプ。
+    ///
+    /// 譜面のページ送りは `ScorePagingView` の `ScrollView` が担うようになった
+    /// （縦置き＝縦スクロール、横置き＝横スクロール）ため、それと同じ軸を
+    /// このジェスチャで奪うと衝突する。ページ送りに使っていない方の軸だけを
+    /// 開閉に割り当てることで、以前と同じ「めくりと衝突しない軸を選ぶ」考え方を保つ。
     private var swipeGesture: some Gesture {
         DragGesture(minimumDistance: 40)
             .onEnded { value in
-                guard abs(value.translation.width) > abs(value.translation.height) else {
-                    // 縦方向の大きなスワイプは操作バーの開閉に使う。
-                    // 譜めくりと衝突しない軸を選んでいる。
-                    // ロック中は開かない（FR-25: 譜めくり以外を無効化する）。
-                    guard !session.isLocked else { return }
-                    withAnimation(.easeOut(duration: 0.15)) { showsControls.toggle() }
-                    return
-                }
-                tapSource.handleSwipe(isForward: value.translation.width < 0)
+                guard !session.isLocked else { return }
+                let isPagingAxisDominant = model.isTwoPageSpread
+                    ? abs(value.translation.width) > abs(value.translation.height)
+                    : abs(value.translation.height) > abs(value.translation.width)
+                guard !isPagingAxisDominant else { return }
+                withAnimation(.easeOut(duration: 0.15)) { showsControls.toggle() }
             }
     }
 
@@ -215,11 +233,16 @@ struct PerformanceView: View {
                 Label("明るさ", systemImage: "sun.max")
             }
 
-            Toggle(isOn: $model.isTwoPageSpread) {
-                Label("見開き", systemImage: "book")
+            // 自動スクロール（ベータ）: 見開きの手動切替に代わって、
+            // 向き自動判定の見開きはここでは触らず、速度指定の自動送りを置いた。
+            Button {
+                model.toggleAutoScroll()
+            } label: {
+                Label(
+                    model.isAutoScrolling ? "自動送り中" : "自動送り（β）",
+                    systemImage: model.isAutoScrolling ? "pause.fill" : "play.fill"
+                )
             }
-            .labelsHidden()
-            .toggleStyle(.button)
 
             // FR-42: 注釈の表示・非表示。書き込みを消さずに譜面だけを見たい場面がある。
             Toggle(isOn: $model.showsAnnotations) {
@@ -301,6 +324,7 @@ extension PerformanceView {
             HStack(spacing: 12) {
                 ForEach(model.jumpPoints, id: \.id) { point in
                     Button {
+                        model.stopAutoScroll()
                         model.goToPage(point.pageIndex)
                     } label: {
                         Text(point.label.isEmpty ? "\(point.pageIndex + 1)ページ目" : point.label)
@@ -315,6 +339,32 @@ extension PerformanceView {
             .padding(.horizontal, 24)
             .padding(.bottom, 12)
         }
+        .background(.ultraThinMaterial)
+    }
+
+    /// 自動送りの速度（新規要望、ベータ）。
+    ///
+    /// 自動送り中だけ出す。速いほど左、遅いほど右にしているのは
+    /// スライダー慣習に合わせただけで、値そのものは「1ページ（見開きは1見開き）
+    /// あたりの秒数」。演奏中に見て操作する前提の設定なので、コントロールバー
+    /// 表示中（＝ロック解除中）にしか出さない。
+    fileprivate var autoScrollSpeedBar: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "hare")
+                .foregroundStyle(.secondary)
+            Slider(
+                value: $model.autoScrollSecondsPerPage,
+                in: PerformanceViewModel.autoScrollRange
+            )
+            Image(systemName: "tortoise")
+                .foregroundStyle(.secondary)
+            Text("\(Int(model.autoScrollSecondsPerPage))秒/ページ")
+                .font(.footnote.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 70, alignment: .trailing)
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 8)
         .background(.ultraThinMaterial)
     }
 
@@ -339,6 +389,7 @@ extension PerformanceView {
                 step: 1,
                 onEditingChanged: { isEditing in
                     if !isEditing, let scrubValue {
+                        model.stopAutoScroll()
                         model.goToPage(Int(scrubValue.rounded()))
                     }
                     self.scrubValue = nil
