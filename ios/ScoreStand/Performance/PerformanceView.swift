@@ -377,6 +377,11 @@ extension PerformanceView {
             Text("\(displayIndex + 1) / \(max(model.pageCount, 1))")
                 .font(.footnote.monospacedDigit())
                 .foregroundStyle(.secondary)
+                // タップでのページ送りだけ、この数字が更新されない不具合が実機で
+                // 見つかった（上部コントロールバーの同種の表示は正しく更新される）。
+                // 原因を安全側に倒して潰すため、ページが変わるたびに `.id` で
+                // このビュー自体を作り直させ、古い値が残る余地を無くす。
+                .id(displayIndex)
             Slider(
                 value: Binding(
                     get: { scrubValue ?? Double(model.currentPageIndex) },
