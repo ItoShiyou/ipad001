@@ -44,14 +44,6 @@ final class PerformanceViewModel {
     /// 注釈レイヤの表示（FR-42）。
     var showsAnnotations = true
 
-    /// 現在ページの前後、スクロール表示の隣枠に出すための先読み済みページ。
-    ///
-    /// `displayedPage` / `displayedSecondaryPage` は「白紙よりは古い表示を優先する」
-    /// 方針（NFR-01対応）のための現在ページ専用の状態で、ここでは触らない。
-    /// こちらは隣の枠（まだ表示に使われていない）のためだけの単純なキャッシュの写しで、
-    /// 空でもチラつきの問題にはならない（先読みが間に合っていれば通常は埋まっている）。
-    private(set) var windowPages: [Int: RenderedPage] = [:]
-
     /// 速度を指定した自動スクロール（新規要望、ベータ）。
     ///
     /// 演奏タイミングを記録して自動再生する本格的な仕組み（要件定義 FR-90〜99）とは別の、
@@ -220,13 +212,11 @@ final class PerformanceViewModel {
 
     private func refreshWindow() {
         guard let score, let renderKey else { return }
-        // 見開きでは「今の見開き2枚」に加えて前後1見開きぶんまで持つ。
-        // スクロール型のページ送り（新規要望）にしたことで、戻る方向のドラッグも
-        // 前へ進む操作と同じくらい日常的に起こるようになったため、以前の
-        // 「前方向に厚く持つ」非対称な窓（前1枚・次2枚）はやめ、前後を揃えた。
+        // 見開きでは「今の見開き2枚」と「次の見開きの左」までを持つ。
+        // 前方向に厚く持つのは、譜めくりが前へ進む操作の方が圧倒的に多いため。
         var indices = [currentPageIndex - 1, currentPageIndex, currentPageIndex + 1]
         if isTwoPageSpread {
-            indices.append(contentsOf: [currentPageIndex - 2, currentPageIndex + 2, currentPageIndex + 3])
+            indices.append(contentsOf: [currentPageIndex + 2, currentPageIndex + 3])
         }
         let descriptors = indices.compactMap {
             PageDescriptorFactory.make(score: score, pageIndex: $0)
@@ -236,20 +226,6 @@ final class PerformanceViewModel {
             currentPageIndex: currentPageIndex,
             key: renderKey
         )
-
-        // 窓の外の隣枠キャッシュは捨てる。
-        let windowIndexSet = Set(indices)
-        windowPages = windowPages.filter { windowIndexSet.contains($0.key) }
-        // `PrerenderCoordinator` は新規に描いたページしか届けてくれないため、
-        // 既にキャッシュ済み（戻ってきた場合など）のページはここで直接拾っておく。
-        Task {
-            for index in indices {
-                guard let page = await coordinator.cachedPage(
-                    scoreID: score.id, pageIndex: index, key: renderKey
-                ) else { continue }
-                windowPages[index] = page
-            }
-        }
     }
 
     private func showCachedPageIfAvailable() {
@@ -262,7 +238,6 @@ final class PerformanceViewModel {
                 scoreID: score.id, pageIndex: index, key: renderKey
             ), index == currentPageIndex {
                 displayedPage = page
-                windowPages[index] = page
                 isWaitingForRender = false
                 Metrics.endPageTurn()
                 Metrics.endColdStartIfNeeded()
@@ -272,14 +247,12 @@ final class PerformanceViewModel {
                 scoreID: score.id, pageIndex: index + 1, key: renderKey
                ), index == currentPageIndex {
                 displayedSecondaryPage = right
-                windowPages[index + 1] = right
             }
         }
     }
 
     private func pageBecameReady(_ page: RenderedPage) {
         guard page.scoreID == score?.id, page.renderKey == renderKey else { return }
-        windowPages[page.pageIndex] = page
 
         if page.pageIndex == currentPageIndex {
             displayedPage = page

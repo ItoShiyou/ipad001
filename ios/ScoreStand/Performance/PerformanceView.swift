@@ -25,10 +25,6 @@ struct PerformanceView: View {
     /// `model.goToPage` を呼ぶ（P1: 演奏中の重い処理を避ける）。
     @State private var scrubValue: Double?
 
-    /// `ScorePagingView` がドラッグ中かどうか。ドラッグ中は注釈が
-    /// 譜面と一緒に動かず取り残されて見えるため、その間だけ薄くする。
-    @State private var isDraggingScore = false
-
     private let hub: PageTurnInputHub
     private let tapSource: TapInputSource
     private let keyboardSource: KeyboardInputSource
@@ -63,33 +59,24 @@ struct PerformanceView: View {
                 // 標準の仕組みで、挿入したバーの実サイズぶん本体コンテンツの
                 // レイアウト領域を確実に縮めてくれるため、そちらに置き換えた。
                 ZStack {
-                    // 譜面のページ送り（新規要望）: 縦置きは縦スクロール・単ページ、
-                    // 横置きは横スクロール・見開き2ページ。向きは
-                    // `PerformanceViewModel.updateLayout` が自動で決める（見開きの
-                    // 手動切替は廃止した）。
-                    //
-                    // 書き込み中は譜面も注釈も反転を止め、両方まとめて通常表示にする。
-                    // 譜面だけ反転したまま注釈だけ非反転にすると、書き込みを終えた
-                    // 瞬間に注釈の色だけ唐突に変わって見え、何が起きたか分からない
-                    // （実機で指摘）。書き込みモードの切り替えそのものを
-                    // 「反転⇔非反転が画面全体でまとまって起きる」動きにすることで、
-                    // 色の変化が反転のせいだと直感的に伝わるようにする。
-                    ScorePagingView(
-                        model: model,
-                        isEditing: isEffectivelyEditing,
-                        onTap: { x, width in
-                            tapSource.handleTap(at: x, width: width)
-                        },
-                        isDragging: $isDraggingScore
+                    PageImageView(
+                        page: model.displayedPage,
+                        secondaryPage: model.displayedSecondaryPage,
+                        // 書き込み中は譜面も注釈も反転を止め、両方まとめて通常表示にする。
+                        // 譜面だけ反転したまま注釈だけ非反転にすると、書き込みを終えた
+                        // 瞬間に注釈の色だけ唐突に変わって見え、何が起きたか分からない
+                        // （実機で指摘）。書き込みモードの切り替えそのものを
+                        // 「反転⇔非反転が画面全体でまとまって起きる」動きにすることで、
+                        // 色の変化が反転のせいだと直感的に伝わるようにする。
+                        isInverted: model.isInverted && !isEffectivelyEditing
                     )
-                    // `.simultaneousGesture` にしているのは、`.gesture` だと
-                    // 排他的に取り合ってしまい、`ScorePagingView` 内の
-                    // `ScrollView`（本来のページ送り）がドラッグを受け取れなくなるため。
-                    .simultaneousGesture(swipeGesture)
+                        .contentShape(Rectangle())
+                        .onTapGesture { location in
+                            tapSource.handleTap(at: location.x, width: proxy.size.width)
+                        }
+                        .gesture(swipeGesture)
 
                     // 注釈は譜面の上に重ねるだけで、譜面自体には触れない（FR-41）。
-                    // ドラッグ中は譜面のスクロールに追従しないため、取り残されて
-                    // 見えないよう一時的に薄くする（止まったら元に戻る）。
                     if let score = model.score {
                         AnnotationOverlay(
                             score: score,
@@ -98,8 +85,6 @@ struct PerformanceView: View {
                             isVisible: model.showsAnnotations,
                             isInverted: model.isInverted && !isEffectivelyEditing
                         )
-                        .opacity(isDraggingScore ? 0.15 : 1)
-                        .animation(.easeOut(duration: 0.15), value: isDraggingScore)
                     }
                 }
                 .safeAreaInset(edge: .top, spacing: 0) {
@@ -184,12 +169,17 @@ struct PerformanceView: View {
         UIScreen.main.brightness = Self.brightnessLevels[brightnessLevelIndex]
     }
 
-    /// コントロールバーの開閉スワイプ。
+    /// スワイプ操作。譜めくり（新規要望）とコントロールバー開閉の両方をここで扱う。
     ///
-    /// 譜面のページ送りは `ScorePagingView` の `ScrollView` が担うようになった
-    /// （縦置き＝縦スクロール、横置き＝横スクロール）ため、それと同じ軸を
-    /// このジェスチャで奪うと衝突する。ページ送りに使っていない方の軸だけを
-    /// 開閉に割り当てることで、以前と同じ「めくりと衝突しない軸を選ぶ」考え方を保つ。
+    /// 縦置き（単ページ）は縦スワイプで譜めくり、横置き（見開き）は横スワイプで
+    /// 譜めくりにする。使っていない方の軸をコントロールバー開閉に割り当てるのは
+    /// 元の設計（「めくりと衝突しない軸を選ぶ」）と同じ考え方。
+    ///
+    /// 実際に画面に追従して流れる連続スクロール（`ScrollView` + 3枠の循環窓）を
+    /// 一度実装したが、実機でページ送りが特定の範囲から進まなくなる・注釈が
+    /// 違うページのまま表示され続けるという重大な不具合が出たため撤回した
+    /// （`docs/implementation-status.md` 参照）。指を離した瞬間に1ページぶんだけ
+    /// 送る、これまでと同じ「離散的な」めくりに留めている。
     private var swipeGesture: some Gesture {
         DragGesture(minimumDistance: 40)
             .onEnded { value in
@@ -197,8 +187,15 @@ struct PerformanceView: View {
                 let isPagingAxisDominant = model.isTwoPageSpread
                     ? abs(value.translation.width) > abs(value.translation.height)
                     : abs(value.translation.height) > abs(value.translation.width)
-                guard !isPagingAxisDominant else { return }
-                withAnimation(.easeOut(duration: 0.15)) { showsControls.toggle() }
+                guard isPagingAxisDominant else {
+                    withAnimation(.easeOut(duration: 0.15)) { showsControls.toggle() }
+                    return
+                }
+                let isForward = model.isTwoPageSpread
+                    ? value.translation.width < 0
+                    : value.translation.height < 0
+                model.stopAutoScroll()
+                model.goToPage(model.currentPageIndex + (isForward ? 1 : -1) * (model.isTwoPageSpread ? 2 : 1))
             }
     }
 
