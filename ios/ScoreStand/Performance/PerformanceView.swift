@@ -25,6 +25,9 @@ struct PerformanceView: View {
     /// `model.goToPage` を呼ぶ（P1: 演奏中の重い処理を避ける）。
     @State private var scrubValue: Double?
 
+    /// ロック解除の確認ダイアログ（下の `lockIndicator` 参照）。
+    @State private var isUnlockConfirmationPresented = false
+
     private let hub: PageTurnInputHub
     private let tapSource: TapInputSource
     private let keyboardSource: KeyboardInputSource
@@ -183,19 +186,24 @@ struct PerformanceView: View {
     private var swipeGesture: some Gesture {
         DragGesture(minimumDistance: 40)
             .onEnded { value in
-                guard !session.isLocked else { return }
                 let isPagingAxisDominant = model.isTwoPageSpread
                     ? abs(value.translation.width) > abs(value.translation.height)
                     : abs(value.translation.height) > abs(value.translation.width)
-                guard isPagingAxisDominant else {
+                if isPagingAxisDominant {
+                    // FR-25: ロック中でも譜めくりだけは動く。ロック判定は
+                    // 「コントロールバー開閉」側だけに掛け、こちらには掛けない。
+                    // 一度両方まとめて `guard !session.isLocked` していたところ、
+                    // ドラッグでの譜めくりまで一緒にロックされてしまう不具合が
+                    // 実機で見つかった。
+                    let isForward = model.isTwoPageSpread
+                        ? value.translation.width < 0
+                        : value.translation.height < 0
+                    model.stopAutoScroll()
+                    model.goToPage(model.currentPageIndex + (isForward ? 1 : -1) * (model.isTwoPageSpread ? 2 : 1))
+                } else {
+                    guard !session.isLocked else { return }
                     withAnimation(.easeOut(duration: 0.15)) { showsControls.toggle() }
-                    return
                 }
-                let isForward = model.isTwoPageSpread
-                    ? value.translation.width < 0
-                    : value.translation.height < 0
-                model.stopAutoScroll()
-                model.goToPage(model.currentPageIndex + (isForward ? 1 : -1) * (model.isTwoPageSpread ? 2 : 1))
             }
     }
 
@@ -411,33 +419,57 @@ extension PerformanceView {
 
     /// ロック中であることの控えめな表示。
     ///
-    /// 解除を長押しにしているのは、ロックの目的が誤タップ防止だからである。
-    /// タップで解除できるなら、そもそも誤タップから守れない。
+    /// 解除にひと手間（確認）を挟んでいるのは、ロックの目的が誤タップ防止
+    /// だからである。ワンタップで即解除できるなら、そもそも誤タップから守れない。
     ///
-    /// 以前は `.frame(maxWidth: .infinity, maxHeight: .infinity)` の後に
-    /// `.onLongPressGesture` を付けており、`.contentShape` も無かったため
-    /// 当たり判定が不確実だった。背後の譜面ビュー（画面全体を覆うタップ・
-    /// スワイプジェスチャを持つ）と競合し、実機で長押しが認識されず
-    /// ロックから抜けられなくなる事故が起きた。円のアイコンそのものに
-    /// 明示的な `contentShape` を与え、VStack/HStack + Spacer で
-    /// 右上に配置することで、当たり判定の範囲をこの円だけに確実に絞る。
+    /// **解除の実装方式の変遷（すべて実機で発覚した事故）**:
+    /// 1. 当初は円に `.onLongPressGesture` を直付け（`.contentShape` 無し）→
+    ///    背後の譜面ビューの全画面ジェスチャと当たり判定が競合し、長押しが
+    ///    認識されずロックから抜けられなくなる事故が起きた。円だけに
+    ///    `contentShape` を絞る形に直した。
+    /// 2. 2026-09-06、譜めくりをドラッグでも行えるようにした際、ロック中も
+    ///    そのドラッグ自体は動くようにした（FR-25）ことで、背後の
+    ///    `swipeGesture`（`DragGesture`）が常に有効になり、上記と同種の
+    ///    競合が実機で再発した。`.highPriorityGesture` + `LongPressGesture`
+    ///    に直したが、それでも実機で解除に失敗することがあった。
+    /// 3. `LongPressGesture` を捨て、`DragGesture(minimumDistance: 0)` で
+    ///    自前のタイマーを起動する方式（指の動きに影響されない）に直したが、
+    ///    **これでも実機で解除に失敗した**。ここまでで、SwiftUI の
+    ///    ジェスチャ同士の優先度をどう調整しても信頼できないと判断した。
+    /// 4. **最終形**: タップ（ジェスチャの競合に弱くない、ごく普通の1回タップ）
+    ///    で `confirmationDialog` を出し、その中の「解除する」ボタンを押させる
+    ///    2段階方式にした。システムのダイアログは表示中、背後のジェスチャを
+    ///    一切受け付けない（OSが保証する動作であり、SwiftUI側の優先度指定に
+    ///    依存しない）ため、原理的に競合しようがない。
     fileprivate var lockIndicator: some View {
         VStack {
             HStack {
                 Spacer()
-                Image(systemName: "lock.fill")
-                    .font(.title2)
-                    .padding(16)
-                    .background(.ultraThinMaterial, in: Circle())
-                    .contentShape(Circle())
-                    .onLongPressGesture(minimumDuration: 1.0) {
-                        session.isLocked = false
-                    }
-                    .accessibilityLabel("ロック中。長押しで解除")
+                Button {
+                    isUnlockConfirmationPresented = true
+                } label: {
+                    Image(systemName: "lock.fill")
+                        .font(.title2)
+                        .padding(16)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .contentShape(Circle())
+                .accessibilityLabel("ロック中。タップして解除")
             }
             Spacer()
         }
         .padding()
+        .confirmationDialog(
+            "ロックを解除しますか？",
+            isPresented: $isUnlockConfirmationPresented,
+            titleVisibility: .visible
+        ) {
+            Button("解除する", role: .destructive) {
+                session.isLocked = false
+            }
+            Button("キャンセル", role: .cancel) {}
+        }
     }
 }
 
