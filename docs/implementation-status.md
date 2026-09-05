@@ -26,8 +26,8 @@
 
 | 項目 | なぜ未検証か |
 |---|---|
-| NFR-01（譜めくり16ms） | **実機でしか測れない。** シミュレータの数値は Mac の性能であり意味がない |
-| NFR-02（起動2秒） | 同上 |
+| NFR-01（譜めくり16ms） | 2026-09-05、実機で**部分的に**計測した（下記参照）。真の「タップから画面に反映されるまで」の計測はまだ |
+| NFR-02（起動2秒） | 実機でしか測れない。今回コールドスタートは1回だけ計測できたが、ユーザーの反応時間込みの値で無効（下記参照） |
 | NFR-03（メモリ上限） | 大判PDFを実機で開かないと分からない |
 | NFR-11（電池2時間） | 実機のみ |
 | Apple Pencil の書き味・パームリジェクション | 実機のみ |
@@ -36,6 +36,28 @@
 
 **次にやるべきはこれ**（[`next-actions.md`](next-actions.md) の1番）。
 コンパイルが通ることと、製品として成立することは別である。
+
+#### NFR-01 実機計測（2026-09-05、初回）
+
+`Instruments` の `os_signpost` 計器（`xcrun xctrace record --instrument os_signpost`）を
+実機（iPad Air 第5世代）に attach し、`Metrics.beginPageTurn()`〜`endPageTurn()` の
+signpost interval を計測した。**これは「`goToPage` が呼ばれてから `displayedPage` が
+書き換わるまで」の計測であり、画面に実際に描画が反映される瞬間（glass-to-glass）までは
+含んでいない**ことに注意（後述）。
+
+| 計測 | 結果 |
+|---|---|
+| 1回目（修正前・タップ譜めくり46回） | 最小6.6ms／中央値20.8ms／最大49.2ms。**46回中30回（65%）が16ms超** |
+| 原因の当たり | 「めくり先はすでに先読み済み」のはずの場面でも、`PageCache`（actor）への `await` を毎回挟んでいたため、そのスケジューリング遅延だけで予算を圧迫していた |
+| 対策 | `PerformanceViewModel` に `recentPages`（直近の窓ぶんのメインアクタ側の同期ミラー）を追加し、先読み済みのページは actor 越しの `await` を経由せず同期的に即決するようにした |
+| 2回目（修正後） | 計測ツール側でサンプルが**1件しか採れなかった**（0.03ms）。おそらく、実行が速すぎて同名signpostが短時間に連続すると Unified Logging 側で間引かれる。数値としては大幅な改善だが、統計的な検証にはなっていない |
+| 依頼者の体感 | 「あまり変わらない」。**予想どおり**——今回計測していたのは「モデルの状態更新」区間であり、実際に画面が塗り替わるまでの glass-to-glass レイテンシ（SwiftUIの差分計算・Core Animationのコミット・次のvsyncまでの待ち、いずれも1フレーム=最大16.7ms@60Hz）はこの計測に含まれない。したがって、この最適化自体は正しい（無駄なactorホップを削っただけで害はない）が、**NFR-01の合否判定にはまだ使えない** |
+
+**残っている宿題**: 真の16ms判定には glass-to-glass の計測が要る。案としては
+(a) 画面を高速度（120fps以上）カメラで録画し、タップの瞬間から画面のページが
+変わって見える瞬間までのフレーム数を数える、
+(b) `CATransaction.setCompletionBlock` などでコミット完了のタイミングまで
+signpostを延長する、のいずれか。(a) の方が実装リスクが無く確実。
 
 ### 実機で見つかった既知の課題（未修正）
 
@@ -64,7 +86,7 @@
 | FR-20 | タップ / スワイプ | `Input/TapInputSource.swift` | ✅ |
 | FR-21 | BLEフットペダル | `Input/KeyboardInputSource.swift` | ✅ HIDキーボードとして受ける |
 | FR-22 | キーボードショートカット | 同上 + `Performance/PerformanceView.swift` | ✅ |
-| FR-24 | 前後1ページを事前描画 | `Rendering/PrerenderCoordinator.swift` | ✅ 設計済み・**未計測** |
+| FR-24 | 前後1ページを事前描画 | `Rendering/PrerenderCoordinator.swift`, `Performance/PerformanceViewModel.swift`（`recentPages`） | ✅ 2026-09-05、実機計測で「先読み済みのはずのページ表示に actor 越しの await が挟まり16ms予算を圧迫していた」ことが判明したため、直近の窓ぶんをメインアクタ上に同期ミラーする `recentPages` を追加。詳細は上の「NFR-01実機計測」参照 |
 | FR-25 | 誤操作防止ロック | `PerformanceSession.swift`, `PerformanceView.swift` | ✅ 譜めくりは残し、それ以外（操作バー・注釈編集）を止める。解除は長押し |
 | FR-28 | 汎用BTリモコン | `Input/KeyboardInputSource.swift` | ✅ |
 | FR-29b | 広いタップ領域 | `Input/TapInputSource.swift`（左右1/3） | ✅ |

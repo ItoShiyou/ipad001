@@ -59,6 +59,18 @@ final class PerformanceViewModel {
     static let autoScrollRange: ClosedRange<Double> = 3...30
     private var autoScrollTask: Task<Void, Never>?
 
+    /// 直近に描画済みのページのメインアクタ側ミラー（NFR-01対応）。
+    ///
+    /// `PageCache` は actor なので、キャッシュ済みかどうかの確認だけでも
+    /// 必ず1回 await を挟む。実機で計測したところ、めくり先が
+    /// すでに先読み済み（＝本来なら即表示できるはず）のときでも、
+    /// この await ぶんのスケジューリング遅延だけで16msの予算の大半〜全部を
+    /// 使ってしまっていた（中央値約21ms、46回中30回が16ms超）。
+    /// `PrerenderCoordinator` が窓を先に描き終えている前提（設計原則の核）を
+    /// 活かし切るため、直近の窓ぶんだけメインアクタ上に同期的な写しを持ち、
+    /// 大半のめくりを await 無しで即決できるようにする。
+    private var recentPages: [PageAddress: RenderedPage] = [:]
+
     private let coordinator: PrerenderCoordinator
     private let session: PerformanceSession
     private let context_: ModelContext
@@ -226,23 +238,59 @@ final class PerformanceViewModel {
             currentPageIndex: currentPageIndex,
             key: renderKey
         )
+
+        // 同期ミラーも窓の外は即座に捨てる。`PageCache` と同じ「窓の外は
+        // 持たない」方針（NFR-03）をこちらにも適用し、無制限に増やさない。
+        let windowAddresses = Set(indices.map {
+            PageAddress(scoreID: score.id, pageIndex: $0, renderKey: renderKey)
+        })
+        recentPages = recentPages.filter { windowAddresses.contains($0.key) }
     }
 
     private func showCachedPageIfAvailable() {
         guard let score, let renderKey else { return }
         let index = currentPageIndex
         let spread = isTwoPageSpread
-        isWaitingForRender = true
+
+        // まず同期ミラーを見る。前後のページは通常すでに先読み済みのため、
+        // ここで見つかるのが大半のはず（`recentPages` 冒頭コメント参照）。
+        var primaryResolved = false
+        let primaryAddress = PageAddress(scoreID: score.id, pageIndex: index, renderKey: renderKey)
+        if let page = recentPages[primaryAddress] {
+            displayedPage = page
+            isWaitingForRender = false
+            Metrics.endPageTurn()
+            Metrics.endColdStartIfNeeded()
+            primaryResolved = true
+        } else {
+            isWaitingForRender = true
+        }
+
+        var secondaryResolved = !spread || index + 1 >= score.pageCount
+        if spread, index + 1 < score.pageCount {
+            let secondaryAddress = PageAddress(scoreID: score.id, pageIndex: index + 1, renderKey: renderKey)
+            if let right = recentPages[secondaryAddress] {
+                displayedSecondaryPage = right
+                secondaryResolved = true
+            }
+        }
+
+        // 両方とも同期で解決できたなら、actor 越しの await は不要。
+        guard !primaryResolved || !secondaryResolved else { return }
+
+        // 同期ミラーに無かった分（初回描画や、窓の外への急なジャンプなど）だけ、
+        // これまでどおり非同期経路にフォールバックする。
         Task {
-            if let page = await coordinator.cachedPage(
+            if !primaryResolved,
+               let page = await coordinator.cachedPage(
                 scoreID: score.id, pageIndex: index, key: renderKey
-            ), index == currentPageIndex {
+               ), index == currentPageIndex {
                 displayedPage = page
                 isWaitingForRender = false
                 Metrics.endPageTurn()
                 Metrics.endColdStartIfNeeded()
             }
-            if spread, index + 1 < score.pageCount,
+            if !secondaryResolved, spread, index + 1 < score.pageCount,
                let right = await coordinator.cachedPage(
                 scoreID: score.id, pageIndex: index + 1, key: renderKey
                ), index == currentPageIndex {
@@ -253,6 +301,7 @@ final class PerformanceViewModel {
 
     private func pageBecameReady(_ page: RenderedPage) {
         guard page.scoreID == score?.id, page.renderKey == renderKey else { return }
+        recentPages[PageAddress(scoreID: page.scoreID, pageIndex: page.pageIndex, renderKey: page.renderKey)] = page
 
         if page.pageIndex == currentPageIndex {
             displayedPage = page
@@ -319,6 +368,7 @@ final class PerformanceViewModel {
 
     func onDisappear() {
         stopAutoScroll()
+        recentPages.removeAll()
         session.end()
         // 表示位置の保存は失敗しても致命的でないため、演奏の妨げにならないよう
         // 画面を離れるこの時点まで遅らせている。
