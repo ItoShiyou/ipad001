@@ -62,6 +62,24 @@ struct PerformanceView: View {
                 // 標準の仕組みで、挿入したバーの実サイズぶん本体コンテンツの
                 // レイアウト領域を確実に縮めてくれるため、そちらに置き換えた。
                 ZStack {
+                    // `.id` + `.transition` は自動スクロール（新規要望）専用の演出。
+                    // タップ・ドラッグ・ペダルなど手動の譜めくりは `withAnimation` で
+                    // 包んでいないため、この `.id` が変わっても瞬時に切り替わるだけで
+                    // アニメーションはしない（NFR-01: 手動操作にアニメーションを足すと
+                    // 応答が遅く感じられる）。自動スクロール側だけが
+                    // `PerformanceViewModel.startAutoScroll` 内で `withAnimation` を
+                    // 使っており、そのときだけこの transition が効く。
+                    //
+                    // 「1,2 → 2,3 → 3,4」のように1ページずつ重ねて流れる本物の
+                    // 連続スクロールは、実機で重大な不具合（ページ送りが止まる・
+                    // 注釈が違うページに残る）を起こして一度撤回している
+                    // （`docs/implementation-status.md` 参照）。同じ危険を避けるため、
+                    // 実際のスクロール位置を追跡する仕組みは一切使わず、
+                    // 「新旧2枚の静止画をスライドで入れ替える」だけの、
+                    // ジェスチャと無関係な見た目だけのアニメーションに留めている。
+                    // 見開きでは、右ページ（例: 2ページ目）が旧スプレッドの右端から
+                    // 消えると同時に新スプレッドの左端に現れるため、重なって
+                    // 連続しているように見える。
                     PageImageView(
                         page: model.displayedPage,
                         secondaryPage: model.displayedSecondaryPage,
@@ -73,6 +91,8 @@ struct PerformanceView: View {
                         // 色の変化が反転のせいだと直感的に伝わるようにする。
                         isInverted: model.isInverted && !isEffectivelyEditing
                     )
+                        .id(model.currentPageIndex)
+                        .transition(pageTransition(pageSize: proxy.size))
                         .contentShape(Rectangle())
                         .onTapGesture { location in
                             tapSource.handleTap(at: location.x, width: proxy.size.width)
@@ -88,6 +108,18 @@ struct PerformanceView: View {
                             isVisible: model.showsAnnotations,
                             isInverted: model.isInverted && !isEffectivelyEditing
                         )
+                        // 自動スクロール中だけ、譜面と同じ `.id` を与えて一緒にスライドさせる
+                        // （実機での指摘: 注釈だけ追従せず取り残されて見えた）。
+                        //
+                        // 手動の譜めくりでは常に同じ固定値にして `.id` を変えない
+                        // ようにしている。ここを常時 `currentPageIndex` にすると、
+                        // ページを送るたびに `AnnotationCanvasView`（PencilKit の
+                        // `PKCanvasView` を包む）が丸ごと作り直されることになり、
+                        // 何度も実機のバグを踏んできたこの部分（ツールピッカーの
+                        // 関連付け・Coordinatorの取り違えなど）に不要なリスクを
+                        // 持ち込んでしまう。自動スクロール中だけの副作用に留める。
+                        .id(model.isAutoScrolling ? model.currentPageIndex : -1)
+                        .transition(pageTransition(pageSize: proxy.size))
                     }
                 }
                 .safeAreaInset(edge: .top, spacing: 0) {
@@ -117,6 +149,15 @@ struct PerformanceView: View {
 
                 if session.isLocked {
                     lockIndicator
+                }
+
+                // FR-98相当: 次の自動送りまでの残り時間を細いバーで予告する。
+                // コントロールバーが隠れていても（＝暗所での本番中でも）見える
+                // 位置に置く必要があるため、`showsControls` に関係なく出す。
+                // 下端は開いている間ページスクラバーと重なるため、上端に置く。
+                if model.isAutoScrolling {
+                    autoScrollProgressBar
+                        .frame(maxHeight: .infinity, alignment: .top)
                 }
 
                 if model.isWaitingForRender {
@@ -165,6 +206,49 @@ struct PerformanceView: View {
     /// 譜面・注釈の反転判定で同じ条件を確実に使い回す。
     private var isEffectivelyEditing: Bool {
         isAnnotating && !session.isLocked
+    }
+
+    /// 自動スクロールの見た目の演出（上のコメント参照）。
+    ///
+    /// 縦置き（単ページ）は下から上へ、横置き（見開き）は右から左へ流れる。
+    /// どちらも「新しいページ・見開きは進む方向の先から現れ、古い方は
+    /// 同じ方向へ抜けていく」という向きに揃えている。
+    ///
+    /// 横置き（見開き）は `.move(edge:)` をやめ、見開き全体の**半分**
+    /// （＝ページ1枚ぶん）だけ動かす `.offset` に変えている。見開きは
+    /// 「2,3」→「3,4」のように中央のページ（3）が両方の見開きに
+    /// またがって存在するため、見開き全体（2ページぶん）を丸ごと
+    /// スライドさせると、3が一瞬完全に消えてから出てくるように見える
+    /// （実機で指摘）。半分だけ動かせば、旧見開きの3と新見開きの3が
+    /// 常に同じ位置に重なって動くため、切れ目なく1枚が横に滑るように見える。
+    private func pageTransition(pageSize: CGSize) -> AnyTransition {
+        model.isTwoPageSpread
+            ? .asymmetric(insertion: .offset(x: pageSize.width / 2), removal: .offset(x: -pageSize.width / 2))
+            : .asymmetric(insertion: .move(edge: .bottom), removal: .move(edge: .top))
+    }
+
+    /// 次の自動送りまでの残り時間を示す、細い進捗バー（新規要望、FR-98相当）。
+    ///
+    /// `TimelineView` で描画側だけを一定間隔で更新し、`PerformanceViewModel` 側は
+    /// 「次に送る時刻」を1回書くだけにしている。ビューモデルを毎フレーム
+    /// 更新すると、譜めくりと無関係な理由で `@Observable` の変更通知が
+    /// 増えてしまう（NFR-01への影響を避けたい）。
+    private var autoScrollProgressBar: some View {
+        TimelineView(.periodic(from: .now, by: 1.0 / 30.0)) { context in
+            GeometryReader { geo in
+                let total = model.autoScrollSecondsPerPage
+                let remaining = model.autoScrollDeadline?.timeIntervalSince(context.date) ?? 0
+                let fraction = total > 0 ? min(1, max(0, 1 - remaining / total)) : 0
+                // 楽譜は基本的に白背景なので、白いバーだと見えにくいという
+                // 実機での指摘を受けて赤にした（目立たせるための色で、
+                // エラーの意味ではない）。
+                Rectangle()
+                    .fill(Color.red)
+                    .frame(width: geo.size.width * fraction)
+            }
+            .frame(height: 4)
+        }
+        .background(.black.opacity(0.2))
     }
 
     private func cycleBrightness() {

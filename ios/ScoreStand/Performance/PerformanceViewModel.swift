@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 import SwiftData
+import SwiftUI
 
 /// 演奏ビューの状態。譜めくり入力を受けて、表示するページを決める。
 ///
@@ -58,6 +59,11 @@ final class PerformanceViewModel {
     }
     static let autoScrollRange: ClosedRange<Double> = 3...30
     private var autoScrollTask: Task<Void, Never>?
+    /// 次のページ送りが起きる時刻（FR-98相当: 「次のめくりまであと何秒か」の
+    /// 予告表示に使う）。時刻だけを持ち、実際の進捗計算は表示側
+    /// （`TimelineView`）に任せる。ここで毎フレーム更新すると、
+    /// ページ送りと無関係な理由でビューモデルの再描画が増えてしまうため。
+    private(set) var autoScrollDeadline: Date?
 
     /// 直近に描画済みのページのメインアクタ側ミラー（NFR-01対応）。
     ///
@@ -327,6 +333,7 @@ final class PerformanceViewModel {
     func stopAutoScroll() {
         guard isAutoScrolling else { return }
         isAutoScrolling = false
+        autoScrollDeadline = nil
         autoScrollTask?.cancel()
         autoScrollTask = nil
     }
@@ -337,16 +344,32 @@ final class PerformanceViewModel {
         autoScrollTask = Task { [weak self] in
             while let self, !Task.isCancelled, self.isAutoScrolling {
                 let seconds = self.autoScrollSecondsPerPage
+                // FR-98相当の予告表示のため、次に送る時刻を公開しておく。
+                self.autoScrollDeadline = Date().addingTimeInterval(seconds)
                 try? await Task.sleep(for: .seconds(seconds))
                 guard !Task.isCancelled, self.isAutoScrolling else { return }
+                // 見開き中も1ページずつ進める（新規要望）。
+                //
+                // 手動の譜めくり（タップ・ドラッグ・ペダル）は見開き2ページぶん
+                // 一気に送るが、自動スクロールは「1,2 → 2,3 → 3,4」のように
+                // 1ページずつ重なりながら流れていくのが要望であるため、ここだけ
+                // 見開きでも +1 にしている。
+                let next = self.currentPageIndex + 1
                 // 曲の最後まで来たら止める（FR-99 と同じく、自動が勝手に
                 // セットリストの先へ進み続けて演奏者を置き去りにしないため）。
-                let next = self.currentPageIndex + (self.isTwoPageSpread ? 2 : 1)
                 guard let score = self.score, next < score.pageCount else {
                     self.stopAutoScroll()
                     return
                 }
-                self.goToPage(next)
+                // 「送る」感を出すため、ここだけアニメーション付きで切り替える。
+                // 手動の譜めくり（NFR-01: 16ms）にアニメーションを付けると
+                // 応答が遅く感じられるため、それらは今までどおり瞬時のまま
+                // （`withAnimation` で包むのはこの自動スクロールの1箇所だけ）。
+                // 実機で試したところ「もう少しゆっくりでいい」とのことだったため、
+                // 上限を0.8秒→1.6秒に、間隔に対する割合も0.3→0.5に上げた。
+                withAnimation(.linear(duration: min(1.6, seconds * 0.5))) {
+                    self.goToPage(next)
+                }
             }
         }
     }
